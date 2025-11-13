@@ -64,21 +64,19 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	if remoteReadFlags.OutputFilename != "" {
 		// ファイルに出力する場合
 		file, err := os.Create(remoteReadFlags.OutputFilename)
-		// 修正: os.Create のエラーチェックを直後に行い、nilデリファレンスを回避
 		if err != nil {
 			return fmt.Errorf("出力ファイルの作成に失敗しました: %w", err)
 		}
-		defer file.Close() // ファイルが正常に作成された場合にのみ defer を設定
+		defer file.Close()
 
 		writer = file
 		outputTarget = remoteReadFlags.OutputFilename
-		fmt.Fprintf(os.Stderr, "読み込み元: %s -> 出力先: %s\n", inputPath, outputTarget)
 	} else {
 		// 標準出力に出力する場合
 		writer = os.Stdout
 		outputTarget = "標準出力 (stdout)"
-		fmt.Fprintf(os.Stderr, "読み込み元: %s -> 出力先: %s\n", inputPath, outputTarget)
 	}
+	fmt.Fprintf(os.Stderr, "読み込み元: %s -> 出力先: %s\n", inputPath, outputTarget)
 
 	// 5. 読み込みと書き込みの実行
 	// io.Copy を使用して効率的にストリームを転送

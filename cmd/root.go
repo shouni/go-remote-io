@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os" // os.Exit を使用するために追加
 	"time"
 
-	"github.com/shouni/go-cli-base"
+	clibase "github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
 
+	// go.modが参照する正しいパス
 	"github.com/shouni/go-remote-io/pkg/factory"
 )
 
@@ -31,10 +33,22 @@ func GetClientFactory(ctx context.Context) (*factory.ClientFactory, error) {
 
 // GlobalFlags はこのアプリケーション固有の永続フラグを保持
 type AppFlags struct {
-	TimeoutSec int // --timeout GCSクライアント初期化用 (使用しないが残す)
+	// 修正: コメントを実態に合わせて修正
+	TimeoutSec int // --timeout ClientFactory初期化時のコンテキストタイムアウト（秒）
 }
 
 var Flags AppFlags // アプリケーション固有フラグにアクセスするためのグローバル変数
+
+// rootCmd の定義を Execute() 外に移動 (cobraの慣習に従う)
+var rootCmd = &cobra.Command{
+	Use:   appName,
+	Short: "A CLI tool for remote I/O operations.",
+	Long:  "The CLI tool for remote I/O operations, supporting local files and GCS URIs.",
+	// Run は Execute() でサブコマンドが登録された後に実行されるため、通常は空かHelpを表示
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
 
 // --- アプリケーション固有のカスタム関数 ---
 
@@ -42,6 +56,10 @@ var Flags AppFlags // アプリケーション固有フラグにアクセスす�
 func addAppPersistentFlags(rootCmd *cobra.Command) {
 	// フラグの追加ロジック...
 	rootCmd.PersistentFlags().IntVar(&Flags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
+
+	// clibaseが提供する共通フラグをここで手動で追加します
+	rootCmd.PersistentFlags().BoolVarP(&clibase.Flags.Verbose, "verbose", "V", false, "Enable verbose output")
+	rootCmd.PersistentFlags().StringVarP(&clibase.Flags.ConfigFile, "config", "C", "", "Config file path")
 }
 
 // initAppPreRunE は、clibase共通処理の後に実行される、アプリケーション固有のPersistentPreRunEです。
@@ -49,11 +67,18 @@ func addAppPersistentFlags(rootCmd *cobra.Command) {
 func initAppPreRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
+	// 1. clibase 共通の PersistentPreRun 処理 (手動で実行)
+	// 設定ファイル読み込みロジックなどをここに記述 (今回はログのみ)
+	if clibase.Flags.Verbose {
+		// ロギングライブラリの初期化などをここで行うことを想定しています。
+		log.Printf("Verboseモードが有効です。")
+	}
+
 	// GCSクライアント初期化のためのコンテキストを設定
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(Flags.TimeoutSec)*time.Second)
 	defer cancel() // 必ずキャンセルを呼び出す
 
-	// 1. ClientFactory の初期化 (ここで GCS Client が一度だけ作成される)
+	// 2. ClientFactory の初期化 (ここで GCS Client が一度だけ作成される)
 	clientFactory, err := factory.NewClientFactory(initCtx)
 	if err != nil {
 		return fmt.Errorf("ClientFactoryの初期化に失敗しました: %w", err)
@@ -73,41 +98,47 @@ func initAppPreRunE(cmd *cobra.Command, args []string) error {
 // --- エントリポイント ---
 
 // Execute は、rootCmd を実行するメイン関数です。
+// defer を確実に実行するため、clibase.Execute の使用を中止します。
 func Execute() {
 	// 実行時にFactoryを保持するためのポインタ。Close()のために必要。
 	var factoryInstance *factory.ClientFactory
 
-	// clibase.Execute はエラーを返すのではなく、内部でos.Exit(1)するため、
-	// 呼び出しを代入文にせず、エラーチェックも省略します。
-	// エラー処理は clibase.Execute 内部に委譲されます。
-	clibase.Execute( // 修正: 代入文を削除
-		appName,
-		addAppPersistentFlags,
-		func(cmd *cobra.Command, args []string) error {
-			// clibase共通のPersistentPreRunE処理を実行
-			if err := initAppPreRunE(cmd, args); err != nil {
-				return err
-			}
+	// 1. 永続フラグの追加と共通フラグの登録
+	addAppPersistentFlags(rootCmd)
 
-			// ContextからFactoryを取得し、外部スコープの変数に格納（Execute後にCloseするため）
-			f, err := GetClientFactory(cmd.Context())
-			if err == nil {
-				// 成功した場合のみファクトリをセット
-				factoryInstance = f
-			}
-			return nil
-		},
-		// サブコマンドを登録
-		remoteReadCmd,
-		// remoteWriteCmd,
-	)
-
-	// GCSクライアントのリソースを解放
-	if factoryInstance != nil {
-		if err := factoryInstance.Close(); err != nil {
-			log.Printf("警告: GCSクライアントのクローズに失敗しました: %v", err)
-		} else if clibase.Flags.Verbose {
-			log.Println("GCSクライアントをクローズしました。")
+	// 2. PersistentPreRunE の設定 (clibase.Executeが担っていた役割をここで実装)
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// initAppPreRunE の実行と factoryInstance への格納を担う
+		if err := initAppPreRunE(cmd, args); err != nil {
+			return err
 		}
+
+		// ContextからFactoryを取得し、外部スコープの変数に格納（Execute後にCloseするため）
+		f, err := GetClientFactory(cmd.Context())
+		if err == nil {
+			factoryInstance = f
+		}
+		return nil
+	}
+
+	// 3. サブコマンドの登録
+	rootCmd.AddCommand(remoteReadCmd)
+	// rootCmd.AddCommand(remoteWriteCmd) // 必要に応じて追加
+
+	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
+	defer func() {
+		if factoryInstance != nil {
+			if err := factoryInstance.Close(); err != nil {
+				log.Printf("警告: GCSクライアントのクローズに失敗しました: %v", err)
+			} else if clibase.Flags.Verbose {
+				log.Println("GCSクライアントをクローズしました。")
+			}
+		}
+	}()
+
+	// 5. rootCmd.Execute() を直接呼び出します。
+	if err := rootCmd.Execute(); err != nil {
+		// cobra.Command.Execute() はエラーを返すため、ここで適切に処理し os.Exit(1)
+		os.Exit(1)
 	}
 }

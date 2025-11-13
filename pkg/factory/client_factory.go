@@ -6,6 +6,7 @@ import (
 
 	"cloud.google.com/go/storage"
 
+	// 独立したリポジトリをインポート
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
@@ -28,8 +29,15 @@ func NewClientFactory(ctx context.Context) (*ClientFactory, error) {
 	return &ClientFactory{gcsClient: client}, nil
 }
 
+// Close は、ファクトリが保持するGCSクライアントをクローズします。
+func (f *ClientFactory) Close() error {
+	if f.gcsClient != nil {
+		return f.gcsClient.Close()
+	}
+	return nil
+}
+
 // GetGCSClient は、ファクトリが保持するGCSクライアントを返します。
-// クライアントはNewClientFactoryで初期化済みのため、エラーを返しません。
 func (f *ClientFactory) GetGCSClient() *storage.Client {
 	return f.gcsClient
 }

@@ -82,8 +82,7 @@ func (r *LocalGCSInputReader) openGCSObject(ctx context.Context, gcsURI string) 
 
 	// 3. オブジェクト名が空の場合（例: gs://bucket/）
 	if objectName == "" {
-		// GCSでは 'gs://bucket/' の形式はリスト操作を意味することが多いが、リーダーとしては無効。
-		return nil, fmt.Errorf("無効なGCS URI形式です: %s (オブジェクト名が空です。gs://bucket-name/ の形式はサポートされていません)", gcsURI)
+		return nil, fmt.Errorf("無効なGCS URI形式です: %s (オブジェクト名が空です。このInputReaderは単一のGCSオブジェクトの読み込みに特化しており、ディレクトリパスはサポートしていません)", gcsURI)
 	}
 	// GCS URI パースロジック完了
 

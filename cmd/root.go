@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os" // os.Exit を使用するために追加
+	"os"
 	"time"
 
 	clibase "github.com/shouni/go-cli-base"
@@ -37,14 +37,14 @@ type AppFlags struct {
 	TimeoutSec int // --timeout ClientFactory初期化時のコンテキストタイムアウト（秒）
 }
 
-var Flags AppFlags // アプリケーション固有フラグにアクセスするためのグローバル変数
+// 修正: 変数名を Go言語の慣習に合わせて appFlags に変更
+var appFlags AppFlags // アプリケーション固有フラグにアクセスするためのグローバル変数
 
-// rootCmd の定義を Execute() 外に移動 (cobraの慣習に従う)
+// rootCmd の定義 (Execute() 内で初期化されるため、ここでは最低限の定義)
 var rootCmd = &cobra.Command{
 	Use:   appName,
 	Short: "A CLI tool for remote I/O operations.",
 	Long:  "The CLI tool for remote I/O operations, supporting local files and GCS URIs.",
-	// Run は Execute() でサブコマンドが登録された後に実行されるため、通常は空かHelpを表示
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
@@ -54,10 +54,13 @@ var rootCmd = &cobra.Command{
 
 // addAppPersistentFlags は、アプリケーション固有の永続フラグをルートコマンドに追加します。
 func addAppPersistentFlags(rootCmd *cobra.Command) {
-	// フラグの追加ロジック...
-	rootCmd.PersistentFlags().IntVar(&Flags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
+	// アプリケーション固有フラグの登録
+	// 修正: 参照箇所を appFlags.TimeoutSec に変更
+	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
 
-	// clibaseが提供する共通フラグをここで手動で追加します
+	// clibaseが提供する共通フラグをここで手動で追加します。
+	// 修正: 保守性のためのコメントを追加
+	// Note: clibaseライブラリに AddPersistentFlags のようなヘルパー関数があれば、それを利用することを強く推奨します。
 	rootCmd.PersistentFlags().BoolVarP(&clibase.Flags.Verbose, "verbose", "V", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVarP(&clibase.Flags.ConfigFile, "config", "C", "", "Config file path")
 }
@@ -68,14 +71,20 @@ func initAppPreRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	// 1. clibase 共通の PersistentPreRun 処理 (手動で実行)
-	// 設定ファイル読み込みロジックなどをここに記述 (今回はログのみ)
 	if clibase.Flags.Verbose {
-		// ロギングライブラリの初期化などをここで行うことを想定しています。
 		log.Printf("Verboseモードが有効です。")
 	}
 
+	// 修正: 設定ファイル読み込みロジックの TODO を追加 (機能不全対策)
+	// TODO: clibase.Flags.ConfigFile が指定されている場合、設定ファイルを読み込むロジックを実装する
+	if clibase.Flags.ConfigFile != "" {
+		// ここで設定ファイルを読み込む処理を実行すべき。clibaseにヘルパー関数がない場合は手動で実装が必要。
+		log.Printf("設定ファイル '%s' の読み込みをスキップしました。", clibase.Flags.ConfigFile)
+	}
+
 	// GCSクライアント初期化のためのコンテキストを設定
-	initCtx, cancel := context.WithTimeout(ctx, time.Duration(Flags.TimeoutSec)*time.Second)
+	// 修正: 参照箇所を appFlags.TimeoutSec に変更
+	initCtx, cancel := context.WithTimeout(ctx, time.Duration(appFlags.TimeoutSec)*time.Second)
 	defer cancel() // 必ずキャンセルを呼び出す
 
 	// 2. ClientFactory の初期化 (ここで GCS Client が一度だけ作成される)

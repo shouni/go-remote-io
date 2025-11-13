@@ -40,14 +40,13 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	clientFactory, err := GetClientFactory(ctx)
 	if err != nil {
 		// Factoryが取得できない場合、GCS依存の機能は実行不可。
-		// ローカルファイルのみをサポートする場合はエラーを調整する必要があるが、ここでは必須とする。
 		return err
 	}
 
 	// 2. InputReader の取得 (依存性の注入)
 	inputReader, err := clientFactory.GetRemoteInputReader()
 	if err != nil {
-		return fmt.Errorf("InputReader作成に失敗しました (%s): %w", inputPath, err)
+		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
 
 	// 3. 読み込みストリームのオープン
@@ -65,10 +64,12 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	if remoteReadFlags.OutputFilename != "" {
 		// ファイルに出力する場合
 		file, err := os.Create(remoteReadFlags.OutputFilename)
+		// 修正: os.Create のエラーチェックを直後に行い、nilデリファレンスを回避
 		if err != nil {
 			return fmt.Errorf("出力ファイルの作成に失敗しました: %w", err)
 		}
-		defer file.Close()
+		defer file.Close() // ファイルが正常に作成された場合にのみ defer を設定
+
 		writer = file
 		outputTarget = remoteReadFlags.OutputFilename
 		fmt.Fprintf(os.Stderr, "読み込み元: %s -> 出力先: %s\n", inputPath, outputTarget)

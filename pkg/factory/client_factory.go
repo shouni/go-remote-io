@@ -32,7 +32,9 @@ func NewClientFactory(ctx context.Context) (*ClientFactory, error) {
 // Close は、ファクトリが保持するGCSクライアントをクローズします。
 func (f *ClientFactory) Close() error {
 	if f.gcsClient != nil {
-		return f.gcsClient.Close()
+		err := f.gcsClient.Close()
+		f.gcsClient = nil // クローズ後にnilに設定
+		return err
 	}
 	return nil
 }

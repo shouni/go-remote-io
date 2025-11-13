@@ -43,6 +43,12 @@ func NewGCSFileWriter(client *storage.Client) *GCSFileWriter {
 
 // WriteToGCS は指定されたバケットとパスにコンテンツを書き込みます。
 func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
+	if bucketName == "" {
+		return fmt.Errorf("GCSへの書き込みに失敗しました: バケット名が空です")
+	}
+	if objectPath == "" {
+		return fmt.Errorf("GCSへの書き込みに失敗しました: オブジェクトパスが空です")
+	}
 	// バケットとオブジェクトの参照を取得
 	bucket := w.client.Bucket(bucketName)
 	obj := bucket.Object(objectPath)

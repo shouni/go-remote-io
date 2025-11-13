@@ -24,7 +24,7 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 Goモジュールとして、以下のコマンドでプロジェクトに追加します。
 
 ```bash
-go get https://github.com/shouni/go-remote-io
+go get github.com/shouni/go-remote-io
 ```
 
 ### 2\. 利用方法（InputReader の例）

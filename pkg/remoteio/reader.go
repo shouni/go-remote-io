@@ -65,14 +65,27 @@ func (r *LocalGCSInputReader) openGCSObject(ctx context.Context, gcsURI string) 
 	}
 
 	// URIのパースロジック
-	path := gcsURI[5:]
-	parts := strings.SplitN(path, "/", 2)
+	path := gcsURI[5:]                    // "gs://" を削除
+	parts := strings.SplitN(path, "/", 2) // バケットとオブジェクトに分割
 
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return nil, fmt.Errorf("無効なGCS URI形式です: %s (gs://bucket-name/object-name の形式で指定してください)", gcsURI)
+	// 1. スラッシュの数が不正な場合（例: gs://bucket）
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("無効なGCS URI形式です: %s (gs://bucket-name/object-name の形式で指定してください。スラッシュの数が不正です)", gcsURI)
 	}
 	bucketName := parts[0]
 	objectName := parts[1]
+
+	// 2. バケット名が空の場合（例: gs:///object）
+	if bucketName == "" {
+		return nil, fmt.Errorf("無効なGCS URI形式です: %s (バケット名が空です)", gcsURI)
+	}
+
+	// 3. オブジェクト名が空の場合（例: gs://bucket/）
+	if objectName == "" {
+		// GCSでは 'gs://bucket/' の形式はリスト操作を意味することが多いが、リーダーとしては無効。
+		return nil, fmt.Errorf("無効なGCS URI形式です: %s (オブジェクト名が空です。gs://bucket-name/ の形式はサポートされていません)", gcsURI)
+	}
+	// GCS URI パースロジック完了
 
 	// GCS オブジェクトリーダーを作成
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)

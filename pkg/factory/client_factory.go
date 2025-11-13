@@ -9,37 +9,40 @@ import (
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
-// =================================================================
-// ストレージクライアントとI/Oコンポーネントのファクトリ
-// =================================================================
+// ClientFactory は、ストレージクライアントとI/Oコンポーネントを生成するためのファクトリです。
+type ClientFactory struct {
+	// GCSクライアントを保持し、再利用します。
+	gcsClient *storage.Client
+}
 
-// GetGCSClient は、Google Cloud Storage (GCS) のクライアントを作成します。
-// GCSクライアントは環境変数や認証情報を自動で処理します。
-func GetGCSClient(ctx context.Context) (*storage.Client, error) {
+// NewClientFactory は新しい ClientFactory インスタンスを作成します。
+// GCSクライアントは一度だけ初期化され、ファクトリ内で再利用されます。
+func NewClientFactory(ctx context.Context) (*ClientFactory, error) {
+	// クライアントの初期化はここで一度だけ行われます。
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("GCSクライアントの初期化に失敗しました: %w", err)
 	}
-	return client, nil
+
+	// ファクトリ構造体に注入
+	return &ClientFactory{gcsClient: client}, nil
+}
+
+// GetGCSClient は、ファクトリが保持するGCSクライアントを返します。
+// クライアントはNewClientFactoryで初期化済みのため、エラーを返しません。
+func (f *ClientFactory) GetGCSClient() *storage.Client {
+	return f.gcsClient
 }
 
 // GetRemoteInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。
 // これは、ローカルファイルとGCSの両方を扱う remoteio.LocalGCSInputReader を生成します。
-func GetRemoteInputReader(ctx context.Context) (remoteio.InputReader, error) {
-	gcsClient, err := GetGCSClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// remoteio パッケージの具象構造体を生成し、インターフェースとして返却
-	return remoteio.NewLocalGCSInputReader(gcsClient), nil
+func (f *ClientFactory) GetRemoteInputReader() remoteio.InputReader {
+	// 保持しているクライアントを注入 (再利用)
+	return remoteio.NewLocalGCSInputReader(f.gcsClient)
 }
 
 // GetGCSOutputWriter は、GCSクライアントを注入した GCSOutputWriter の具象実装を返します。
-func GetGCSOutputWriter(ctx context.Context) (remoteio.GCSOutputWriter, error) {
-	gcsClient, err := GetGCSClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// remoteio パッケージの具象構造体を生成し、インターフェースとして返却
-	return remoteio.NewGCSFileWriter(gcsClient), nil
+func (f *ClientFactory) GetGCSOutputWriter() remoteio.GCSOutputWriter {
+	// 保持しているクライアントを注入 (再利用)
+	return remoteio.NewGCSFileWriter(f.gcsClient)
 }

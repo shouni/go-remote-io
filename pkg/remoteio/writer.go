@@ -8,6 +8,8 @@ import (
 	"cloud.google.com/go/storage"
 )
 
+const DefaultContentType = "text/plain; charset=utf-8"
+
 // =================================================================
 // 1. インターフェース定義
 // =================================================================
@@ -48,10 +50,15 @@ func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath s
 	// Writerを取得し、コンテキストを使用してタイムアウトやキャンセルを処理可能にする
 	wc := obj.NewWriter(ctx)
 
-	// Content-Typeを引数から設定 (動的指定)
-	wc.ContentType = contentType
+	// Content-Typeを設定。空文字列の場合はデフォルト値を適用
+	if contentType == "" {
+		wc.ContentType = DefaultContentType
+	} else {
+		wc.ContentType = contentType
+	}
+	// MIMEタイプ設定ロジック
 
-	// io.Copy を使用してストリーミング書き込み (パフォーマンス改善)
+	// io.Copy を使用してストリーミング書き込み
 	if _, err := io.Copy(wc, contentReader); err != nil {
 		wc.Close() // 書き込みエラー時は必ず閉じる
 		return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)

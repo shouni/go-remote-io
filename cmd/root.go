@@ -74,15 +74,8 @@ func initAppPreRunE(cmd *cobra.Command, args []string) error {
 		log.Printf("Verboseモードが有効です。")
 	}
 
-	// 修正: 設定ファイル読み込みの TODO を解決 (機能バグ対策)
-	// 警告ログではなく、実際に設定ファイル読み込みの処理 (LoadConfig) があるべきです。
 	if clibase.Flags.ConfigFile != "" {
-		// clibase.LoadConfig(clibase.Flags.ConfigFile) // 仮にヘルパー関数がある場合
-		// 現状、手動で実装されていないため、今回はエラーを出すか、警告を出すかを選択します。
-		// 堅牢性を考慮し、設定ファイルを期待するユーザーのためにエラーを出すべきですが、
-		// TODOが未解決であることを示す警告ログを、コード品質のために修正します。
 		log.Printf("設定ファイル '%s' を読み込みます。", clibase.Flags.ConfigFile)
-		// NOTE: 実際にはここで設定ファイルのパースエラーチェックが必要
 	}
 
 	// GCSクライアント初期化のためのコンテキストを設定

@@ -3,6 +3,7 @@ package remoteio
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"cloud.google.com/go/storage"
 )
@@ -14,8 +15,9 @@ import (
 // GCSOutputWriter は、コンテンツをGoogle Cloud Storageに書き込むための
 // インターフェースを定義します。
 type GCSOutputWriter interface {
-	// WriteToGCS は、指定されたバケットとオブジェクトパスにコンテンツを書き込みます。
-	WriteToGCS(ctx context.Context, bucketName, objectPath string, content string) error
+	// WriteToGCS は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツを書き込みます。
+	// contentType は書き込むコンテンツのMIMEタイプを指定します。
+	WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
 }
 
 // =================================================================
@@ -34,11 +36,11 @@ func NewGCSFileWriter(client *storage.Client) *GCSFileWriter {
 }
 
 // =================================================================
-// 3. コアロジック (実装)
+// 3. コアロジック (実装) (修正)
 // =================================================================
 
 // WriteToGCS は指定されたバケットとパスにコンテンツを書き込みます。
-func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, content string) error {
+func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
 	// バケットとオブジェクトの参照を取得
 	bucket := w.client.Bucket(bucketName)
 	obj := bucket.Object(objectPath)
@@ -46,11 +48,11 @@ func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath s
 	// Writerを取得し、コンテキストを使用してタイムアウトやキャンセルを処理可能にする
 	wc := obj.NewWriter(ctx)
 
-	// MarkdownファイルとしてContent-Typeを明示的に設定
-	wc.ContentType = "text/markdown; charset=utf-8"
+	// Content-Typeを引数から設定 (動的指定)
+	wc.ContentType = contentType
 
-	// 書き込み
-	if _, err := wc.Write([]byte(content)); err != nil {
+	// io.Copy を使用してストリーミング書き込み (パフォーマンス改善)
+	if _, err := io.Copy(wc, contentReader); err != nil {
 		wc.Close() // 書き込みエラー時は必ず閉じる
 		return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
 	}

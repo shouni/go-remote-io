@@ -44,7 +44,6 @@ func NewLocalGCSInputReader(gcsClient *storage.Client) *LocalGCSInputReader {
 // =================================================================
 
 // Open は、ファイルパスを検査し、ローカルファイルまたはGCSからストリームを開きます。
-// GCSかどうかの判定ロジックは、このメソッド内にあります。
 func (r *LocalGCSInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	// GCS URI 判定ロジック
 	if strings.HasPrefix(filePath, "gs://") {

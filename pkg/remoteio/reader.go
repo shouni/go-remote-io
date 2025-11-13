@@ -61,7 +61,7 @@ func (r *LocalGCSInputReader) Open(ctx context.Context, filePath string) (io.Rea
 // openGCSObject は、GCS URI からオブジェクトを読み込み、io.ReadCloser を返します。
 func (r *LocalGCSInputReader) openGCSObject(ctx context.Context, gcsURI string) (io.ReadCloser, error) {
 	if r.gcsClient == nil {
-		return nil, fmt.Errorf("GCS URIが指定されましたが、GCSクライアントが初期化されていません。")
+		return nil, fmt.Errorf("GCSクライアントが初期化されていないため、GCSオブジェクトを読み込めません (URI: %s)", gcsURI)
 	}
 
 	// URIのパースロジック

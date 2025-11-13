@@ -12,7 +12,7 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 **主要な機能と特徴 (`package remoteio`):**
 
 * **統一された入力インターフェース**: `InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても透過的に `io.ReadCloser` を開きます。
-* **GCS書き込み**: `GCSOutputWriter` により、アプリケーションコンテンツを直接 GCS バケットへストリーム書き込みできます。
+* **GCSストリーム書き込み (強化)**: `GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存しますが、I/Oロジック自体は純粋にこのパッケージ内で完結します。
 
 -----
@@ -39,10 +39,9 @@ import (
     "fmt"
     "io"
     "log"
-    "os"
-    
-    "cloud.google.com/go/storage" // GCSクライアント
-    "github.com/shouni/go-remote-io/remoteio" // I/Oロジック
+
+	"cloud.google.com/go/storage"
+	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
 func main() {
@@ -75,6 +74,52 @@ func main() {
 }
 ```
 
+### 3\. 利用方法（GCSOutputWriter の例）
+
+`GCSOutputWriter` を利用して、任意の `io.Reader` から GCS にコンテンツを書き込みます。
+
+```go
+package main
+
+import (
+    "bytes"
+    "context"
+    "log"
+    
+    "cloud.google.com/go/storage"
+	"github.com/shouni/go-remote-io/pkg/remoteio"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // 1. GCSクライアントの初期化
+    gcsClient, err := storage.NewClient(ctx)
+    if err != nil {
+        log.Fatalf("GCSクライアント初期化失敗: %v", err)
+    }
+    defer gcsClient.Close()
+    
+    // 2. remoteio.GCSOutputWriter の実装を取得
+    writer := remoteio.NewGCSFileWriter(gcsClient)
+    
+    // 3. 書き込むデータとメタデータの準備
+    content := "これはGCSにアップロードされるテストコンテンツです。"
+    bucketName := "my-output-bucket"
+    objectPath := "output/result.txt"
+    contentType := "" // 空文字列を指定すると、"text/plain; charset=utf-8" が適用される
+    
+    reader := bytes.NewReader([]byte(content))
+    
+    // 4. GCSへの書き込み実行
+    log.Printf("GCSへ書き込み開始: gs://%s/%s", bucketName, objectPath)
+    if err := writer.WriteToGCS(ctx, bucketName, objectPath, reader, contentType); err != nil {
+        log.Fatalf("GCSへの書き込みに失敗しました: %v", err)
+    }
+    log.Println("GCSへの書き込みが完了しました。")
+}
+```
+
 -----
 
 ## 📐 ライブラリ構成
@@ -104,3 +149,4 @@ go-remote-io/
 ### 📜 ライセンス (License)
 
 このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
+

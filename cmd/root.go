@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"time"
 
-	"cloud.google.com/go/storage"
-	"github.com/shouni/go-cli-base"
+	clibase "github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
+
+	// go.modが参照する正しいパス
+	"github.com/shouni/go-remote-io/pkg/factory"
 )
 
 const (
@@ -15,56 +19,81 @@ const (
 	defaultTimeoutSec = 10         // 秒
 )
 
-// gcsClientKey は context.Context に *storage.Client を格納・取得するための非公開キー
-type gcsClientKey struct{}
+// FactoryKey は context.Context に *factory.ClientFactory を格納・取得するための非公開キー
+type FactoryKey struct{}
 
-// GetGCSClient は、cmd.Context() から *storage.Client を取り出す公開関数です。
-func GetGCSClient(ctx context.Context) (*storage.Client, error) {
-	if client, ok := ctx.Value(gcsClientKey{}).(*storage.Client); ok {
-		return client, nil
+// GetClientFactory は、cmd.Context() から *factory.ClientFactory を取り出す公開関数です。
+func GetClientFactory(ctx context.Context) (*factory.ClientFactory, error) {
+	if f, ok := ctx.Value(FactoryKey{}).(*factory.ClientFactory); ok {
+		return f, nil
 	}
-	// GCSクライアントは必須ではない場合もあるため、エラーメッセージを調整
-	return nil, fmt.Errorf("contextからGCSクライアントを取得できませんでした。rootコマンドの初期化を確認してください。")
+	return nil, fmt.Errorf("contextからClientFactoryを取得できませんでした。rootコマンドの初期化を確認してください。")
 }
 
 // GlobalFlags はこのアプリケーション固有の永続フラグを保持
 type AppFlags struct {
-	TimeoutSec int // --timeout GCSクライアント初期化用
+	TimeoutSec int // --timeout ClientFactory初期化時のコンテキストタイムアウト（秒）
 }
 
-var Flags AppFlags // アプリケーション固有フラグにアクセスするためのグローバル変数
+// 修正: 変数名を Go言語の慣習に合わせて appFlags に変更
+var appFlags AppFlags
+
+// rootCmd の定義
+var rootCmd = &cobra.Command{
+	Use:   appName,
+	Short: "A CLI tool for remote I/O operations.",
+	Long:  "The CLI tool for remote I/O operations, supporting local files and GCS URIs.",
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
 
 // --- アプリケーション固有のカスタム関数 ---
 
 // addAppPersistentFlags は、アプリケーション固有の永続フラグをルートコマンドに追加します。
 func addAppPersistentFlags(rootCmd *cobra.Command) {
-	// GCSクライアントの初期化に特化したフラグのみを残す
-	rootCmd.PersistentFlags().IntVar(&Flags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
-	// Note: Title, Message, HTTP Clientの初期化は不要なため削除
+	// 1. アプリケーション固有フラグの登録
+	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
+
+	// 2. clibaseが提供する共通フラグの登録
+	// 修正: clibaseにヘルパー関数 AddPersistentFlags が追加されたと仮定して利用
+	// clibase.AddPersistentFlags(rootCmd)
+	// ※ 記憶している clibase にこの関数はないため、ここでは既存のコードを残し、コメントで推奨を示します。
+	// 現状維持: clibaseの変更が確認できるまで、手動登録を維持します。
+	rootCmd.PersistentFlags().BoolVarP(&clibase.Flags.Verbose, "verbose", "V", false, "Enable verbose output")
+	rootCmd.PersistentFlags().StringVarP(&clibase.Flags.ConfigFile, "config", "C", "", "Config file path")
 }
 
 // initAppPreRunE は、clibase共通処理の後に実行される、アプリケーション固有のPersistentPreRunEです。
+// ここでClientFactoryを初期化し、Contextに格納します。
 func initAppPreRunE(cmd *cobra.Command, args []string) error {
-	// GCSクライアントの初期化
 	ctx := cmd.Context()
 
-	// GCSクライアントの初期化（タイムアウトはコンテキストに影響）
-	// Note: GCSクライアントの初期化自体にタイムアウトは直接適用されないが、
-	// NewClientが内部で使用する認証情報の取得等でコンテキストが使われるため、ここではコンテキストを更新しない。
-	// GCSの操作は、各コマンドのRunEでGetGCSClient経由で行う。
+	// 1. clibase 共通の PersistentPreRun 処理 (手動で実行)
+	if clibase.Flags.Verbose {
+		log.Printf("Verboseモードが有効です。")
+	}
 
-	// GCSクライアントを初期化し、コンテキストに格納
-	gcsClient, err := storage.NewClient(ctx) // GCSクライアントを初期化
+	if clibase.Flags.ConfigFile != "" {
+		log.Printf("設定ファイル '%s' を読み込みます。", clibase.Flags.ConfigFile)
+	}
+
+	// GCSクライアント初期化のためのコンテキストを設定
+	initCtx, cancel := context.WithTimeout(ctx, time.Duration(appFlags.TimeoutSec)*time.Second)
+	defer cancel() // 必ずキャンセルを呼び出す
+
+	// 2. ClientFactory の初期化 (GCS Client が一度だけ作成される)
+	clientFactory, err := factory.NewClientFactory(initCtx)
 	if err != nil {
-		return fmt.Errorf("GCSクライアントの初期化に失敗しました: %w", err)
+		return fmt.Errorf("ClientFactoryの初期化に失敗しました: %w", err)
 	}
 
 	if clibase.Flags.Verbose {
-		log.Printf("GCSクライアントを初期化しました。")
+		log.Printf("ClientFactory（GCSクライアント含む）を初期化し、コンテキストに格納しました。")
 	}
 
-	// コマンドのコンテキストに GCS Client を格納
-	newCtx := context.WithValue(ctx, gcsClientKey{}, gcsClient)
+	// コマンドのコンテキストに ClientFactory を格納
+	newCtx := context.WithValue(ctx, FactoryKey{}, clientFactory)
 	cmd.SetContext(newCtx)
 
 	return nil
@@ -74,13 +103,44 @@ func initAppPreRunE(cmd *cobra.Command, args []string) error {
 
 // Execute は、rootCmd を実行するメイン関数です。
 func Execute() {
-	// ここでは、サブコマンドとして GCS I/Oのテスト用コマンドを登録する
-	clibase.Execute(
-		appName,
-		addAppPersistentFlags,
-		initAppPreRunE,
-		// 例として、リモートリードコマンドを登録 (まだ作成していません)
-		// remoteReadCmd,
-		// remoteWriteCmd,
-	)
+	// 実行時にFactoryを保持するためのポインタ。Close()のために必要。
+	var factoryInstance *factory.ClientFactory
+
+	// 1. 永続フラグの追加と共通フラグの登録
+	addAppPersistentFlags(rootCmd)
+
+	// 2. PersistentPreRunE の設定 (clibase.Executeが担っていた役割をここで実装)
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// initAppPreRunE の実行と factoryInstance への格納を担う
+		if err := initAppPreRunE(cmd, args); err != nil {
+			return err
+		}
+
+		// ContextからFactoryを取得し、外部スコープの変数に格納（Execute後にCloseするため）
+		f, err := GetClientFactory(cmd.Context())
+		if err == nil {
+			factoryInstance = f
+		}
+		return nil
+	}
+
+	// 3. サブコマンドの登録
+	rootCmd.AddCommand(remoteReadCmd)
+	// rootCmd.AddCommand(remoteWriteCmd) // 必要に応じて追加
+
+	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
+	defer func() {
+		if factoryInstance != nil {
+			if err := factoryInstance.Close(); err != nil {
+				log.Printf("警告: GCSクライアントのクローズに失敗しました: %v", err)
+			} else if clibase.Flags.Verbose {
+				log.Println("GCSクライアントをクローズしました。")
+			}
+		}
+	}()
+
+	// 5. rootCmd.Execute() を直接呼び出します。
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

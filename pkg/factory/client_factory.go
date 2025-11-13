@@ -6,7 +6,6 @@ import (
 
 	"cloud.google.com/go/storage"
 
-	// 独立したリポジトリをインポート
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 

@@ -11,7 +11,7 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 **主要な機能と特徴 (`package remoteio`):**
 
-* **統一された入力インターフェース**: `InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても透過的に `io.ReadCloser` を開きます。
+* **統一された入力インターフェース**: `InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても透過的に `io.ReadCloser` を開きます。**この処理は全てファクトリを介して依存性注入されます。**
 * **GCSストリーム書き込み (強化)**: `GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存しますが、I/Oロジック自体は純粋にこのパッケージ内で完結します。
 
@@ -40,8 +40,8 @@ import (
     "io"
     "log"
 
-	"cloud.google.com/go/storage"
-	"github.com/shouni/go-remote-io/pkg/remoteio"
+    "cloud.google.com/go/storage"
+    "github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
 func main() {
@@ -87,7 +87,7 @@ import (
     "log"
     
     "cloud.google.com/go/storage"
-	"github.com/shouni/go-remote-io/pkg/remoteio"
+    "github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
 func main() {
@@ -131,9 +131,12 @@ go-remote-io/
 ├── go.mod
 ├── go.sum
 ├── README.md
-├── remoteio/
-│   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
-│   └── writer.go   # GCSOutputWriter インターフェースと GCSFileWriter の実装
+├── pkg/
+│   ├── remoteio/
+│   │   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
+│   │   └── writer.go   # GCSOutputWriter インターフェースと GCSFileWriter の実装
+│   └── factory/
+│       └── factory.go   # ClientFactory による依存性注入（DI）とリソース管理
 └── cmd/ (オプション: テスト/デモ用 CLI)
     └── root.go
 ```
@@ -142,7 +145,8 @@ go-remote-io/
 
 本ライブラリは、以下の主要な外部パッケージに依存しています。
 
-* **`cloud.google.com/go/storage`**: Google Cloud Storage へのアクセスを処理します。
+* **`cloud.google.com/go/storage`**: Google Cloud Storage へのアクセスを処理します。（**コアライブラリ依存**）
+* **その他**: CLIアプリケーション (`cmd/`) は、`github.com/spf13/cobra` および `github.com/shouni/go-cli-base` に依存しています。
 
 -----
 

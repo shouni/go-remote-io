@@ -10,31 +10,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RemoteReadFlags は remote-read コマンド固有のフラグを保持します。
-type RemoteReadFlags struct {
+// remoteTransferFlags は remote-transfer コマンド固有のフラグを保持します。
+type remoteTransferFlags struct {
 	OutputFilename string // -o, --output 出力ファイル名
 }
 
-var remoteReadFlags RemoteReadFlags
+var flags remoteTransferFlags // フラグ変数の名前を 'flags' に変更
 
-// remoteReadCmd は 'remote-read' サブコマンドを定義します。
-var remoteReadCmd = &cobra.Command{
-	Use:   "remote-read [path]",
-	Short: "指定されたパス（ローカルファイルまたは GCS URI）から内容を読み込み、標準出力またはファイルに出力します。",
-	Long: `指定されたパスから io.ReadCloser を開きます。
-パスが 'gs://' で始まっていれば GCS から、そうでなければローカルファイルとして読み込みます。
-読み込みには ClientFactory から取得した InputReader を使用します。`,
+// remoteTransferCmd は 'remote-transfer' サブコマンドを定義します。
+var remoteTransferCmd = &cobra.Command{
+	Use:   "remote-transfer [source_path]", // コマンド名を remote-transfer に変更
+	Short: "指定されたパスから内容を読み込み、指定された出力先へ転送します。",
+	Long: `指定されたパス (ローカルファイル、または GCS URI) から io.ReadCloser を開きます。
+読み込んだ内容は、標準出力、ローカルファイル、または GCS URIで指定されたリモートパスへ転送されます。`,
 	Args: cobra.ExactArgs(1), // 1つのパス引数を必須とする
-	RunE: runRemoteRead,
+	RunE: runRemoteTransfer,  // 実行関数名を runRemoteTransfer に変更
 }
 
 func init() {
 	// フラグの初期化
-	remoteReadCmd.Flags().StringVarP(&remoteReadFlags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+	remoteTransferCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
-// runRemoteRead は remote-read コマンドの実行ロジックです。
-func runRemoteRead(cmd *cobra.Command, args []string) error {
+// runRemoteTransfer は remote-transfer コマンドの実行ロジックです。
+func runRemoteTransfer(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
 
@@ -58,8 +57,8 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	defer rc.Close() // 読み込みストリームは必ずクローズする
 
 	// 4. 出力先の決定とデータの転送
-	if remoteReadFlags.OutputFilename != "" {
-		outputPath := remoteReadFlags.OutputFilename
+	if flags.OutputFilename != "" {
+		outputPath := flags.OutputFilename
 
 		if remoteio.IsGCSURI(outputPath) {
 			// GCS URIが指定された場合
@@ -68,10 +67,10 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("GCSOutputWriterの作成に失敗しました: %w", err)
 			}
 
-			// ★修正: writerがGCSOutputWriterインターフェースを満たすかチェック
+			// writerがGCSOutputWriterインターフェースを満たすかチェック
 			gcsWriter, ok := writer.(remoteio.GCSOutputWriter)
 			if !ok {
-				return fmt.Errorf("内部エラー: OutputWriterがGCSOutputWriterインターフェースを満たしていません")
+				return fmt.Errorf("FactoryがGCS出力用のWriterインターフェース(remoteio.GCSOutputWriter)を提供していません")
 			}
 
 			// URIをバケット名とオブジェクトパスにパース
@@ -96,15 +95,13 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 			// ローカルファイルが指定された場合
 			writer, err := clientFactory.NewOutputWriter()
 			if err != nil {
-				// ローカルファイルの書き込みに失敗した場合の汎用エラー
 				return fmt.Errorf("LocalOutputWriterの作成に失敗しました: %w", err)
 			}
 
-			// ★修正: writerがLocalOutputWriterインターフェースを満たすかチェック
+			// writerがLocalOutputWriterインターフェースを満たすかチェック
 			localWriter, ok := writer.(remoteio.LocalOutputWriter)
 			if !ok {
-				// Factoryが返す具象型は、GCSまたはLocalのいずれか（または両方）のインターフェースを満たしている必要があります。
-				return fmt.Errorf("内部エラー: OutputWriterがLocalOutputWriterインターフェースを満たしていません")
+				return fmt.Errorf("Factoryがローカルファイル出力用のWriterインターフェース(remoteio.LocalOutputWriter)を提供していません")
 			}
 
 			slog.Info("データ転送開始",

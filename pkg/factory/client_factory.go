@@ -5,26 +5,27 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/storage"
-
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
-// ClientFactory は、ストレージクライアントとI/Oコンポーネントを生成するためのファクトリです。
+type Factory interface {
+	GetGCSClient() (*storage.Client, error)
+	GetRemoteInputReader() (remoteio.InputReader, error)
+	GetGCSOutputWriter() (remoteio.GCSOutputWriter, error)
+	Close() error
+}
+
+// ClientFactory は Factory インターフェースの実装
 type ClientFactory struct {
-	// GCSクライアントを保持し、再利用します。
 	gcsClient *storage.Client
 }
 
-// NewClientFactory は新しい ClientFactory インスタンスを作成します。
-// GCSクライアントは一度だけ初期化され、ファクトリ内で再利用されます。
-func NewClientFactory(ctx context.Context) (*ClientFactory, error) {
-	// クライアントの初期化はここで一度だけ行われます。
+// NewClientFactory は新しい Factory インスタンスを作成します。
+func NewClientFactory(ctx context.Context) (Factory, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("GCSクライアントの初期化に失敗しました: %w", err)
 	}
-
-	// ファクトリ構造体に注入
 	return &ClientFactory{gcsClient: client}, nil
 }
 
@@ -38,27 +39,26 @@ func (f *ClientFactory) Close() error {
 	return nil
 }
 
-// GetGCSClient は、ファクトリが保持するGCSクライアントを返します。
+// GetGCSClient は、ファクトリが保持するGCSクライアントを返します。（エラーメッセージ改善）
 func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
 	if f.gcsClient == nil {
-		return nil, fmt.Errorf("GCSクライアントが利用できません (ファクトリが初期化されていないか、既にクローズされています)")
+		return nil, fmt.Errorf("GCSクライアントは既にクローズされています")
 	}
 	return f.gcsClient, nil
 }
 
-// GetRemoteInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。
-// これは、ローカルファイルとGCSの両方を扱う remoteio.LocalGCSInputReader を生成します。
+// GetRemoteInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。（エラーメッセージ改善）
 func (f *ClientFactory) GetRemoteInputReader() (remoteio.InputReader, error) {
 	if f.gcsClient == nil {
-		return nil, fmt.Errorf("GCSクライアントが利用できないため、InputReaderを生成できません (ファクトリが初期化されていないか、既にクローズされています)")
+		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、InputReaderを生成できません")
 	}
 	return remoteio.NewLocalGCSInputReader(f.gcsClient), nil
 }
 
-// GetGCSOutputWriter は、GCSクライアントを注入した GCSOutputWriter の具象実装を返します。
+// GetGCSOutputWriter は、GCSクライアントを注入した GCSOutputWriter の具象実装を返します。（エラーメッセージ改善）
 func (f *ClientFactory) GetGCSOutputWriter() (remoteio.GCSOutputWriter, error) {
 	if f.gcsClient == nil {
-		return nil, fmt.Errorf("GCSクライアントが利用できないため、GCSOutputWriterを生成できません (ファクトリが初期化されていないか、既にクローズされています)")
+		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、GCSOutputWriterを生成できません")
 	}
 	return remoteio.NewGCSFileWriter(f.gcsClient), nil
 }

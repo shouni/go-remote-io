@@ -10,30 +10,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// remoteTransferFlags は remote-transfer コマンド固有のフラグを保持します。
-type remoteTransferFlags struct {
+// rcopyFlags は rcopy コマンド固有のフラグを保持します。
+type rcopyFlags struct {
 	OutputFilename string // -o, --output 出力ファイル名
 }
 
-var flags remoteTransferFlags // フラグ変数の名前を 'flags' に変更
+var flags rcopyFlags // フラグ変数の名前を 'flags' に変更
 
-// remoteTransferCmd は 'remote-transfer' サブコマンドを定義します。
-var remoteTransferCmd = &cobra.Command{
-	Use:   "remote-transfer [source_path]", // コマンド名を remote-transfer に変更
-	Short: "指定されたパスから内容を読み込み、指定された出力先へ転送します。",
+// rcopyCmd は 'rcopy' サブコマンドを定義します。
+var rcopyCmd = &cobra.Command{
+	Use:   "rcopy [source_path]", // コマンド名を rcopy に変更
+	Short: "リモート/ローカルパス間で内容を読み込み、指定された出力先へ転送します。",
 	Long: `指定されたパス (ローカルファイル、または GCS URI) から io.ReadCloser を開きます。
 読み込んだ内容は、標準出力、ローカルファイル、または GCS URIで指定されたリモートパスへ転送されます。`,
 	Args: cobra.ExactArgs(1), // 1つのパス引数を必須とする
-	RunE: runRemoteTransfer,  // 実行関数名を runRemoteTransfer に変更
+	RunE: runRcopy,           // 実行関数名を runRcopy に変更
 }
 
 func init() {
 	// フラグの初期化
-	remoteTransferCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+	rcopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
-// runRemoteTransfer は remote-transfer コマンドの実行ロジックです。
-func runRemoteTransfer(cmd *cobra.Command, args []string) error {
+// runRcopy は rcopy コマンドの実行ロジックです。
+func runRcopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
 

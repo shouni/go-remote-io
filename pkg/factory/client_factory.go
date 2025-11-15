@@ -20,12 +20,12 @@ type Factory interface {
 	Close() error
 }
 
-// ClientFactory は Factory インターフェースの実装
+// ClientFactory は Factory インターフェースを実装し、GCSクライアントと関連するI/Oコンポーネントを管理します。
 type ClientFactory struct {
 	gcsClient *storage.Client
 }
 
-// NewClientFactory は新しい Factory インターフェースを返す ClientFactory インスタンスを作成します。
+// NewClientFactory は新しい Factory インターフェースの実装である ClientFactory インスタンスを作成します。
 func NewClientFactory(ctx context.Context) (Factory, error) {
 	// クライアントの初期化はここで一度だけ行われます。
 	client, err := storage.NewClient(ctx)

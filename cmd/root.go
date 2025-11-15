@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"time"
@@ -120,9 +119,9 @@ func Execute() {
 	defer func() {
 		if factoryInstance != nil {
 			if err := factoryInstance.Close(); err != nil {
-				log.Printf("警告: GCSクライアントのクローズに失敗しました: %v", err)
+				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
 			} else if clibase.Flags.Verbose {
-				log.Println("GCSクライアントをクローズしました。")
+				slog.Info("GCSクライアントをクローズしました。")
 			}
 		}
 	}()

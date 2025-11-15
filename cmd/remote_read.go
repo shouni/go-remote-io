@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings" // GCS URIの判定に使用
 
+	"github.com/shouni/go-remote-io/pkg/remoteio"
 	"github.com/spf13/cobra"
 	// 依存パッケージのインポート (ClientFactory, remoteio.GCSOutputWriter, remoteio.InputReaderなど)
 )
@@ -73,7 +74,7 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 			}
 
 			// URIをバケット名とオブジェクトパスにパース
-			bucket, object, err := outputWriter.ParseGCSURI(outputPath)
+			bucket, object, err := remoteio.ParseGCSURI(outputPath)
 			if err != nil {
 				return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
 			}
@@ -81,7 +82,6 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 			outputTarget = outputPath
 			slog.Info("読み込み元: %s -> 出力先(GCS): %s", inputPath, outputTarget)
 
-			// ★修正: WriteToGCS に読み込みストリーム (rc) を渡して書き込みを実行させる
 			// Content-Type はここでは空文字列を指定し、Writer側でデフォルト値が適用されるようにする
 			if err := outputWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
 				return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)

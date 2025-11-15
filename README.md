@@ -9,11 +9,11 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 このライブラリは、アプリケーションの I/O 依存性を抽象化し、ビジネスロジックから GCS とローカルファイルの判別ロジックを分離します。
 
-**主要な機能と特徴:**
+## ✨ 主要な機能と特徴
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **GCSストリーム書き込み (強化)**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
+* **GCSストリーム書き込み (強化)**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
 -----
@@ -30,7 +30,7 @@ go get github.com/shouni/go-remote-io
 
 ### 2\. 利用方法（InputReader の例）
 
-`factory.Factory` を初期化し、そこから `NewInputReader()` メソッドを使ってコンポーネントを取得します。
+`factory.Factory` を初期化し、そこから **`NewInputReader()`** メソッドを使ってコンポーネントを取得します。
 
 ```go
 package main
@@ -48,12 +48,11 @@ func main() {
     ctx := context.Background()
 
     // 1. Factoryの初期化
-    // GCSクライアントの初期化と管理をFactoryに委譲
     clientFactory, err := factory.NewClientFactory(ctx)
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
-    // ★修正: FactoryのClose()をdeferで呼び出し、リソースを解放する
+    // ★重要: FactoryのClose()をdeferで呼び出し、リソースを解放する
     defer func() {
         if closeErr := clientFactory.Close(); closeErr != nil {
             log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
@@ -61,7 +60,6 @@ func main() {
     }()
     
     // 2. InputReader の実装を取得
-    // ★修正: NewInputReader() メソッドを使用
     reader, err := clientFactory.NewInputReader()
     if err != nil {
         log.Fatalf("InputReader生成失敗: %v", err)
@@ -96,8 +94,8 @@ import (
     "context"
     "log"
     
-    // 適切なモジュールパスを使用
     "github.com/shouni/go-remote-io/pkg/factory"
+    "github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
 func main() {
@@ -115,7 +113,6 @@ func main() {
     }()
     
     // 2. GCSOutputWriter の実装を取得
-    // ★修正: NewOutputWriter() メソッドを使用
     writer, err := clientFactory.NewOutputWriter()
     if err != nil {
         log.Fatalf("OutputWriter生成失敗: %v", err)
@@ -130,6 +127,7 @@ func main() {
     reader := bytes.NewReader([]byte(content))
     
     // 4. GCSへの書き込み実行
+    // writerは remoteio.GCSOutputWriter インターフェースを実装している
     log.Printf("GCSへ書き込み開始: gs://%s/%s", bucketName, objectPath)
     if err := writer.WriteToGCS(ctx, bucketName, objectPath, reader, contentType); err != nil {
         log.Fatalf("GCSへの書き込みに失敗しました: %v", err)
@@ -146,6 +144,9 @@ CLIアプリケーションのエントリポイントを含む、再利用可�
 
 ```
 go-remote-io/
+├── go.mod
+├── go.sum
+├── README.md
 ├── pkg/
 │   ├── remoteio/
 │   │   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
@@ -168,4 +169,3 @@ go-remote-io/
 ### 📜 ライセンス (License)
 
 このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
-

@@ -15,6 +15,7 @@ type Factory interface {
 	// NewInputReader は GCSクライアントを注入した InputReader を生成します。
 	NewInputReader() (remoteio.InputReader, error)
 	// NewOutputWriter は GCSクライアントを注入した GCSOutputWriter を生成します。
+	// 具象型は LocalOutputWriter も満たす必要があります。
 	NewOutputWriter() (remoteio.GCSOutputWriter, error)
 	// Close は保持しているリソースを解放します。
 	Close() error
@@ -65,10 +66,12 @@ func (f *ClientFactory) NewInputReader() (remoteio.InputReader, error) {
 	return remoteio.NewLocalGCSInputReader(f.gcsClient), nil
 }
 
-// NewOutputWriter は、GCSクライアントを注入した GCSOutputWriter の具象実装を返します。
+// NewOutputWriter は、GCSクライアントを注入した UniversalIOWriter の具象実装を返します。
+// UniversalIOWriter は GCSOutputWriter と LocalOutputWriter の両方を満たします。
 func (f *ClientFactory) NewOutputWriter() (remoteio.GCSOutputWriter, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、GCSOutputWriterを生成できません")
 	}
-	return remoteio.NewGCSFileWriter(f.gcsClient), nil
+	// ★修正: UniversalIOWriter を返す
+	return remoteio.NewUniversalIOWriter(f.gcsClient), nil
 }

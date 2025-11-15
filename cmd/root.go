@@ -61,8 +61,6 @@ var rootCmd = &cobra.Command{
 func addAppPersistentFlags(rootCmd *cobra.Command) {
 	// 1. アプリケーション固有フラグの登録
 	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
-	rootCmd.PersistentFlags().BoolVarP(&clibase.Flags.Verbose, "verbose", "V", false, "Enable verbose output")
-	rootCmd.PersistentFlags().StringVarP(&clibase.Flags.ConfigFile, "config", "C", "", "Config file path")
 }
 
 // initAppPreRunE は、clibase共通処理の後に実行される、アプリケーション固有のPersistentPreRunEです。
@@ -112,7 +110,7 @@ func Execute() {
 	}
 
 	// 3. サブコマンドの登録
-	rootCmd.AddCommand(remoteReadCmd)
+	rootCmd.AddCommand(rcopyCmd)
 	// rootCmd.AddCommand(remoteWriteCmd) // 必要に応じて追加
 
 	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)

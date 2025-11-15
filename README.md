@@ -13,7 +13,7 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **統一された出力インターフェース (新規)**: `remoteio.GCSOutputWriter` および **`remoteio.LocalOutputWriter`** インターフェースを提供します。CLIなどでは、出力先に応じてこれらのインターフェースにキャストして利用します。
+* **統一された出力インターフェース**: `remoteio.GCSOutputWriter` および **`remoteio.LocalOutputWriter`** インターフェースを提供します。CLIなどでは、出力先に応じてこれらのインターフェースにキャストして利用します。
 * **GCSストリーム書き込み**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
@@ -115,6 +115,7 @@ func main() {
     }()
     
     // 2. OutputWriter の実装を取得し、GCSOutputWriterにキャスト
+    // Factoryが返す具象型は GCSOutputWriter と LocalOutputWriter の両方を満たす必要があります。
     rawWriter, err := clientFactory.NewOutputWriter()
     if err != nil {
         log.Fatalf("OutputWriter生成失敗: %v", err)
@@ -146,7 +147,7 @@ func main() {
 
 ## 💻 CLI実行方法とデータ転送の例
 
-`remote-transfer` サブコマンドは、入力元と出力先がローカルファイル、または GCS URI のいずれであっても、透過的なデータ転送を可能にします。
+**`rcopy`** サブコマンドは、入力元と出力先がローカルファイル、または GCS URI のいずれであっても、透過的なデータ転送を可能にします。
 
 ### 1\. 標準出力への転送 (GCS → Stdout)
 
@@ -154,7 +155,7 @@ func main() {
 
 ```bash
 # コマンド例: GCSのファイルを標準出力に出力
-$ go run ./ remote-transfer gs://input-bucket/data.txt
+$ go run ./ rcopy gs://input-bucket/data.txt
 ```
 
 ### 2\. ローカルファイルへの転送 (Local → Local)
@@ -163,7 +164,7 @@ $ go run ./ remote-transfer gs://input-bucket/data.txt
 
 ```bash
 # コマンド例: ローカルファイルをローカルファイルに転送
-$ go run ./ remote-transfer ./local/data.csv -o ./output/result.csv
+$ go run ./ rcopy ./local/data.csv -o ./output/result.csv
 ```
 
 ### 3\. GCSオブジェクトへの転送 (Local → GCS)
@@ -172,7 +173,7 @@ $ go run ./ remote-transfer ./local/data.csv -o ./output/result.csv
 
 ```bash
 # コマンド例: ローカルファイルをGCSに転送
-$ go run ./ remote-transfer ./local/report.json -o gs://dest-bucket/archive/report.json
+$ go run ./ rcopy ./local/report.json -o gs://dest-bucket/archive/report.json
 ```
 
 ### 4\. GCSからGCSへの転送 (GCS → GCS)
@@ -181,7 +182,7 @@ GCSオブジェクトから読み込み、別のGCSオブジェクトへ直接�
 
 ```bash
 # コマンド例: GCSオブジェクト間での転送
-$ go run ./ remote-transfer gs://source-bucket/file.dat -o gs://dest-bucket/archive/file.dat
+$ go run ./ rcopy gs://source-bucket/file.dat -o gs://dest-bucket/archive/file.dat
 
 # 実行ログの例
 2025/11/16 03:39:25 INFO データ転送開始 input=gs://source-bucket/file.dat output=gs://dest-bucket/archive/file.dat type=GCS
@@ -203,7 +204,7 @@ go-remote-io/
 │   └── factory/
 │       └── factory.go   # Factory インターフェースと ClientFactory によるDIとリソース管理
 └── cmd/ 
-    └── remote_transfer.go # CLIアプリケーション (remote-transfer) のエントリポイント
+    └── rcopy.go         # CLIアプリケーション (rcopy) のエントリポイント
     └── root.go          # CLIアプリケーションのルートコマンド定義
 ```
 

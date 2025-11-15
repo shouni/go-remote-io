@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"cloud.google.com/go/storage"
 )
@@ -19,37 +20,29 @@ const DefaultContentType = "text/plain; charset=utf-8"
 // GCSOutputWriter は、Google Cloud Storage (GCS) にコンテンツを書き込むためのインターフェースです。
 type GCSOutputWriter interface {
 	// WriteToGCS は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツを書き込みます。
-	// contentType は書き込むコンテンツのMIMEタイプを指定します。空文字列の場合、デフォルト値が適用されます。
 	WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
 }
 
 // LocalOutputWriter は、ローカルファイルシステムにコンテンツを書き込むためのインターフェースです。
-// このインターフェースは、GCS以外の出力先を抽象化するために導入されました。
 type LocalOutputWriter interface {
 	// WriteToLocal は、指定されたローカルパスに io.Reader からコンテンツを書き込みます。
 	WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error
 }
 
 // =================================================================
-// 2. 具象構造体とコンストラクタ
+// 2. 具象構造体とコンストラクタ (UniversalIOWriterへ統合)
 // =================================================================
 
-// GCSFileWriter は GCSOutputWriter インターフェースの具象実装です。
-type GCSFileWriter struct {
-	client *storage.Client
+// UniversalIOWriter は GCSOutputWriter と LocalOutputWriter の両方を満たす具象型です。
+type UniversalIOWriter struct {
+	gcsClient *storage.Client
+	// LocalFileWriter の機能は外部依存がないため、フィールドは不要
 }
 
-// NewGCSFileWriter は新しい GCSFileWriter インスタンスを作成します。
-func NewGCSFileWriter(client *storage.Client) *GCSFileWriter {
-	return &GCSFileWriter{client: client}
-}
-
-// LocalFileWriter は LocalOutputWriter インターフェースの具象実装です。
-type LocalFileWriter struct{}
-
-// NewLocalFileWriter は新しい LocalFileWriter インスタンスを作成します。
-func NewLocalFileWriter() *LocalFileWriter {
-	return &LocalFileWriter{}
+// NewUniversalIOWriter は新しい UniversalIOWriter インスタンスを作成します。
+// Factoryはこの関数を使って、GCSクライアントを注入したI/Oライターを生成します。
+func NewUniversalIOWriter(client *storage.Client) *UniversalIOWriter {
+	return &UniversalIOWriter{gcsClient: client}
 }
 
 // =================================================================
@@ -57,7 +50,7 @@ func NewLocalFileWriter() *LocalFileWriter {
 // =================================================================
 
 // WriteToGCS は GCSOutputWriter インターフェースを実装します。
-func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
+func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
 	targetURI := fmt.Sprintf("gs://%s/%s", bucketName, objectPath)
 
 	if bucketName == "" {
@@ -66,13 +59,16 @@ func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath s
 	if objectPath == "" {
 		return fmt.Errorf("GCSへの書き込みに失敗しました: オブジェクトパスが空です")
 	}
+	if w.gcsClient == nil {
+		// このチェックはFactory側でもされるが、堅牢性向上のため
+		return fmt.Errorf("GCSへの書き込みに失敗しました: GCSクライアントが初期化されていません")
+	}
 
 	slog.Info("GCS書き込み処理開始", slog.String("uri", targetURI), slog.String("content_type", contentType))
 
-	bucket := w.client.Bucket(bucketName)
+	bucket := w.gcsClient.Bucket(bucketName)
 	obj := bucket.Object(objectPath)
 
-	// GCS WriterはContextをサポート
 	wc := obj.NewWriter(ctx)
 
 	if contentType == "" {
@@ -82,6 +78,7 @@ func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath s
 	}
 
 	if _, err := io.Copy(wc, contentReader); err != nil {
+		// Copy失敗時はwriterをクローズし、エラーを返す
 		wc.Close()
 		slog.Error("GCSへのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
 		return fmt.Errorf("GCSへのコンテンツ書き込み中にエラーが発生しました: %w", err)
@@ -97,9 +94,19 @@ func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath s
 }
 
 // WriteToLocal は LocalOutputWriter インターフェースを実装します。
-func (w *LocalFileWriter) WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error {
-
+func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error {
+	// Contextは、ローカルファイルの操作では通常使用されないが、シグネチャを合わせる
+	_ = ctx
 	slog.Info("ローカル書き込み処理開始", slog.String("path", path))
+
+	// ★修正適用: 出力先のディレクトリが存在しない場合は作成 (os.MkdirAll)
+	outputDir := filepath.Dir(path)
+	if outputDir != "" && outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			slog.Error("出力ディレクトリの作成に失敗", slog.String("path", path), slog.String("error", err.Error()))
+			return fmt.Errorf("出力ディレクトリ(%s)の作成に失敗しました: %w", outputDir, err)
+		}
+	}
 
 	file, err := os.Create(path)
 	if err != nil {
@@ -117,6 +124,6 @@ func (w *LocalFileWriter) WriteToLocal(ctx context.Context, path string, content
 	return nil
 }
 
-// 型アサーションチェック
-var _ GCSOutputWriter = (*GCSFileWriter)(nil)
-var _ LocalOutputWriter = (*LocalFileWriter)(nil)
+// 型アサーションチェック (UniversalIOWriterが両方のインターフェースを満たしていることを確認)
+var _ GCSOutputWriter = (*UniversalIOWriter)(nil)
+var _ LocalOutputWriter = (*UniversalIOWriter)(nil)

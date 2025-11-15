@@ -112,7 +112,7 @@ func Execute() {
 	}
 
 	// 3. サブコマンドの登録
-	rootCmd.AddCommand(remoteReadCmd)
+	rootCmd.AddCommand(remoteTransferCmd)
 	// rootCmd.AddCommand(remoteWriteCmd) // 必要に応じて追加
 
 	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)

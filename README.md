@@ -13,7 +13,8 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **GCSストリーム書き込み (強化)**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
+* **統一された出力インターフェース (新規)**: `remoteio.GCSOutputWriter` および **`remoteio.LocalOutputWriter`** インターフェースを提供します。CLIなどでは、出力先に応じてこれらのインターフェースにキャストして利用します。
+* **GCSストリーム書き込み**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
 -----
@@ -85,7 +86,7 @@ func main() {
 
 ### 3\. 利用方法（GCSOutputWriter の例）
 
-`factory.NewOutputWriter()` を使用して `GCSOutputWriter` を取得します。
+`factory.NewOutputWriter()` を使用して `GCSOutputWriter` を取得します。Factoryが返す具象型を**適切なインターフェースにキャスト**して利用します。
 
 ```go
 package main
@@ -96,6 +97,7 @@ import (
     "log"
     
     "github.com/shouni/go-remote-io/pkg/factory"
+    "github.com/shouni/go-remote-io/pkg/remoteio" // remoteioインターフェース用
 )
 
 func main() {
@@ -112,10 +114,15 @@ func main() {
         }
     }()
     
-    // 2. GCSOutputWriter の実装を取得
-    writer, err := clientFactory.NewOutputWriter()
+    // 2. OutputWriter の実装を取得し、GCSOutputWriterにキャスト
+    rawWriter, err := clientFactory.NewOutputWriter()
     if err != nil {
         log.Fatalf("OutputWriter生成失敗: %v", err)
+    }
+    
+    writer, ok := rawWriter.(remoteio.GCSOutputWriter)
+    if !ok {
+        log.Fatalf("Factoryが GCSOutputWriter インターフェースを提供していません。")
     }
     
     // 3. 書き込むデータとメタデータの準備
@@ -137,26 +144,47 @@ func main() {
 
 -----
 
-## 💻 CLI実行方法とリモート出力の例
+## 💻 CLI実行方法とデータ転送の例
 
-`remote-read` サブコマンドは、入力元と出力先が**ローカル、GCSのいずれであっても透過的**に処理できるように拡張されました。
+`remote-transfer` サブコマンドは、入力元と出力先がローカルファイル、または GCS URI のいずれであっても、透過的なデータ転送を可能にします。
 
-| 出力先 | 動作 | コマンド例 |
-| :--- | :--- | :--- |
-| **標準出力** | 入力元のデータをそのまま標準出力に出力する | `$ go run ./ remote-read gs://input-bucket/data.txt` |
-| **ローカルファイル** | 入力元のデータをローカルファイルに書き出す | `$ go run ./ remote-read ./local/data.csv -o ./output/result.csv` |
-| **GCSオブジェクト** | 入力元のデータをGCSの別のパスへストリーミングで書き出す | `$ go run ./ remote-read gs://source-bucket/file.dat -o gs://dest-bucket/archive/file.dat` |
+### 1\. 標準出力への転送 (GCS → Stdout)
 
-### 実行例（GCSからGCSへの転送）
-
-以下のコマンドは、GCSオブジェクトから読み込み、別のGCSオブジェクトへ直接内容をストリーミング転送することに成功した例です。
+入力元のデータをそのまま標準出力に出力します。
 
 ```bash
-# 抽象化されたGCSパスを使用して実行
-$ go run ./ remote-read gs://source-bucket/input-data.txt -o "gs://dest-bucket/output/result.txt"
+# コマンド例: GCSのファイルを標準出力に出力
+$ go run ./ remote-transfer gs://input-bucket/data.txt
+```
 
-# 実行ログ (GCSからGCSへの転送が確認できる)
-2025/11/16 03:39:25 INFO 読み込み元: gs://source-bucket/input-data.txt -> 出力先(GCS): gs://dest-bucket/output/result.txt
+### 2\. ローカルファイルへの転送 (Local → Local)
+
+ローカルファイルを読み込み、別のローカルファイルに書き出します。
+
+```bash
+# コマンド例: ローカルファイルをローカルファイルに転送
+$ go run ./ remote-transfer ./local/data.csv -o ./output/result.csv
+```
+
+### 3\. GCSオブジェクトへの転送 (Local → GCS)
+
+ローカルファイルを読み込み、GCSバケットへストリーミングで書き出します。
+
+```bash
+# コマンド例: ローカルファイルをGCSに転送
+$ go run ./ remote-transfer ./local/report.json -o gs://dest-bucket/archive/report.json
+```
+
+### 4\. GCSからGCSへの転送 (GCS → GCS)
+
+GCSオブジェクトから読み込み、別のGCSオブジェクトへ直接内容をストリーミング転送します。これは、**サーバーサイドでのパイプライン処理**に非常に有用です。
+
+```bash
+# コマンド例: GCSオブジェクト間での転送
+$ go run ./ remote-transfer gs://source-bucket/file.dat -o gs://dest-bucket/archive/file.dat
+
+# 実行ログの例
+2025/11/16 03:39:25 INFO データ転送開始 input=gs://source-bucket/file.dat output=gs://dest-bucket/archive/file.dat type=GCS
 ```
 
 -----
@@ -167,17 +195,16 @@ CLIアプリケーションのエントリポイントを含む、再利用可�
 
 ```
 go-remote-io/
-├── go.mod
-├── go.sum
-├── README.md
 ├── pkg/
 │   ├── remoteio/
 │   │   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
-│   │   └── writer.go   # GCSOutputWriter インターフェースと GCSFileWriter の実装
+│   │   ├── writer.go   # OutputWriter (GCS/Local) インターフェースと具象実装
+│   │   └── uri.go      # GCS URI判定・パースユーティリティ (IsGCSURI, ParseGCSURI)
 │   └── factory/
 │       └── factory.go   # Factory インターフェースと ClientFactory によるDIとリソース管理
 └── cmd/ 
-    └── root.go          # CLIアプリケーション (remoteio) のエントリポイント
+    └── remote_transfer.go # CLIアプリケーション (remote-transfer) のエントリポイント
+    └── root.go          # CLIアプリケーションのルートコマンド定義
 ```
 
 ### 外部依存パッケージ

@@ -16,15 +16,17 @@ const DefaultContentType = "text/plain; charset=utf-8"
 // 1. インターフェース定義
 // =================================================================
 
-// GCSOutputWriter は、GCSへの書き込みに特化したインターフェースです。
+// GCSOutputWriter は、Google Cloud Storage (GCS) にコンテンツを書き込むためのインターフェースです。
 type GCSOutputWriter interface {
 	// WriteToGCS は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツを書き込みます。
+	// contentType は書き込むコンテンツのMIMEタイプを指定します。空文字列の場合、デフォルト値が適用されます。
 	WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
 }
 
-// LocalOutputWriter は、ローカルファイルへの書き込みに特化したインターフェースです。
+// LocalOutputWriter は、ローカルファイルシステムにコンテンツを書き込むためのインターフェースです。
+// このインターフェースは、GCS以外の出力先を抽象化するために導入されました。
 type LocalOutputWriter interface {
-	// WriteToLocal は、指定されたローカルパスにコンテンツを書き込みます。
+	// WriteToLocal は、指定されたローカルパスに io.Reader からコンテンツを書き込みます。
 	WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error
 }
 

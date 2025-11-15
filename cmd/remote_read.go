@@ -5,11 +5,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings" // GCS URIの判定に使用
 
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 	"github.com/spf13/cobra"
-	// 依存パッケージのインポート (ClientFactory, remoteio.GCSOutputWriter, remoteio.InputReaderなど)
 )
 
 // RemoteReadFlags は remote-read コマンド固有のフラグを保持します。
@@ -60,17 +58,20 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	defer rc.Close() // 読み込みストリームは必ずクローズする
 
 	// 4. 出力先の決定とデータの転送
-	var outputTarget string
-
 	if remoteReadFlags.OutputFilename != "" {
 		outputPath := remoteReadFlags.OutputFilename
 
-		if strings.HasPrefix(outputPath, "gs://") {
-			// GCS URIが指定された場合: GCSOutputWriterを使用し、io.CopyをWriteToGCS内で実行させる
-
-			outputWriter, err := clientFactory.NewOutputWriter()
+		if remoteio.IsGCSURI(outputPath) {
+			// GCS URIが指定された場合
+			writer, err := clientFactory.NewOutputWriter()
 			if err != nil {
 				return fmt.Errorf("GCSOutputWriterの作成に失敗しました: %w", err)
+			}
+
+			// ★修正: writerがGCSOutputWriterインターフェースを満たすかチェック
+			gcsWriter, ok := writer.(remoteio.GCSOutputWriter)
+			if !ok {
+				return fmt.Errorf("内部エラー: OutputWriterがGCSOutputWriterインターフェースを満たしていません")
 			}
 
 			// URIをバケット名とオブジェクトパスにパース
@@ -79,40 +80,55 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
 			}
 
-			outputTarget = outputPath
-			slog.Info("読み込み元: %s -> 出力先(GCS): %s", inputPath, outputTarget)
+			slog.Info("データ転送開始",
+				slog.String("input", inputPath),
+				slog.String("output", outputPath),
+				slog.String("type", "GCS"),
+			)
 
-			// Content-Type はここでは空文字列を指定し、Writer側でデフォルト値が適用されるようにする
-			if err := outputWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
+			if err := gcsWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
 				return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
 			}
 
-			// GCSへの書き込みが完了したため、ここで処理を終了する
 			return nil
 
 		} else {
-			// ローカルファイルが指定された場合: os.Createを使用する
-			file, err := os.Create(outputPath)
+			// ローカルファイルが指定された場合
+			writer, err := clientFactory.NewOutputWriter()
 			if err != nil {
-				return fmt.Errorf("出力ファイルの作成に失敗しました: %w", err)
+				// ローカルファイルの書き込みに失敗した場合の汎用エラー
+				return fmt.Errorf("LocalOutputWriterの作成に失敗しました: %w", err)
 			}
-			defer file.Close()
 
-			writer := file // ローカル書き込み用ライターを定義
-			outputTarget = outputPath
-			slog.Info("読み込み元: %s -> 出力先(ローカル): %s", inputPath, outputTarget)
-
-			// 5. 読み込みと書き込みの実行 (ローカルファイルの場合)
-			if _, err := io.Copy(writer, rc); err != nil {
-				return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
+			// ★修正: writerがLocalOutputWriterインターフェースを満たすかチェック
+			localWriter, ok := writer.(remoteio.LocalOutputWriter)
+			if !ok {
+				// Factoryが返す具象型は、GCSまたはLocalのいずれか（または両方）のインターフェースを満たしている必要があります。
+				return fmt.Errorf("内部エラー: OutputWriterがLocalOutputWriterインターフェースを満たしていません")
 			}
+
+			slog.Info("データ転送開始",
+				slog.String("input", inputPath),
+				slog.String("output", outputPath),
+				slog.String("type", "LocalFile"),
+			)
+
+			// WriteToLocalにrcを渡して書き込みを実行
+			if err := localWriter.WriteToLocal(ctx, outputPath, rc); err != nil {
+				return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
+			}
+
 			return nil
 		}
 	} else {
 		// 標準出力に出力する場合
-		writer := os.Stdout // 標準出力ライターを定義
-		outputTarget = "標準出力 (stdout)"
-		slog.Info("読み込み元: %s -> 出力先: %s", inputPath, outputTarget)
+		writer := os.Stdout
+
+		slog.Info("データ転送開始",
+			slog.String("input", inputPath),
+			slog.String("output", "stdout"),
+			slog.String("type", "Stdout"),
+		)
 
 		// 5. 読み込みと書き込みの実行 (標準出力の場合)
 		if _, err := io.Copy(writer, rc); err != nil {

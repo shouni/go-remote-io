@@ -13,7 +13,7 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **GCSストリーム書き込み (強化)**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。**（← 行12: MIMEタイプ指定の記述を復元）**
+* **GCSストリーム書き込み (強化)**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
 -----
@@ -48,7 +48,7 @@ func main() {
     ctx := context.Background()
 
     // 1. Factoryの初期化
-    // GCSクライアントの初期化と管理をFactoryに委譲 (← 行49: コメントを復元)
+    // GCSクライアントの初期化と管理をFactoryに委譲
     clientFactory, err := factory.NewClientFactory(ctx)
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
@@ -137,6 +137,30 @@ func main() {
 
 -----
 
+## 💻 CLI実行方法とリモート出力の例
+
+`remote-read` サブコマンドは、入力元と出力先が**ローカル、GCSのいずれであっても透過的**に処理できるように拡張されました。
+
+| 出力先 | 動作 | コマンド例 |
+| :--- | :--- | :--- |
+| **標準出力** | 入力元のデータをそのまま標準出力に出力する | `$ go run ./ remote-read gs://input-bucket/data.txt` |
+| **ローカルファイル** | 入力元のデータをローカルファイルに書き出す | `$ go run ./ remote-read ./local/data.csv -o ./output/result.csv` |
+| **GCSオブジェクト** | 入力元のデータをGCSの別のパスへストリーミングで書き出す | `$ go run ./ remote-read gs://source-bucket/file.dat -o gs://dest-bucket/archive/file.dat` |
+
+### 実行例（GCSからGCSへの転送）
+
+以下のコマンドは、GCSオブジェクトから読み込み、別のGCSオブジェクトへ直接内容をストリーミング転送することに成功した例です。
+
+```bash
+# 抽象化されたGCSパスを使用して実行
+$ go run ./ remote-read gs://source-bucket/input-data.txt -o "gs://dest-bucket/output/result.txt"
+
+# 実行ログ (GCSからGCSへの転送が確認できる)
+2025/11/16 03:39:25 INFO 読み込み元: gs://source-bucket/input-data.txt -> 出力先(GCS): gs://dest-bucket/output/result.txt
+```
+
+-----
+
 ## 📐 ライブラリ構成
 
 CLIアプリケーションのエントリポイントを含む、再利用可能なパッケージ構成です。
@@ -168,4 +192,3 @@ go-remote-io/
 ### 📜 ライセンス (License)
 
 このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
-

@@ -5,8 +5,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings" // GCS URIの判定に使用
 
 	"github.com/spf13/cobra"
+	// 依存パッケージのインポート (ClientFactory, remoteio.GCSOutputWriter, remoteio.InputReaderなど)
 )
 
 // RemoteReadFlags は remote-read コマンド固有のフラグを保持します。
@@ -37,52 +39,85 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
 
-	// 1. ClientFactory の取得
+	// 1. ClientFactory の取得 (DI)
 	clientFactory, err := GetFactoryFromContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 2. InputReader の取得 (依存性の注入)
+	// 2. InputReader の取得 (入力依存性の注入)
 	inputReader, err := clientFactory.NewInputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
 
 	// 3. 読み込みストリームのオープン
-	// InputReaderはパスを判断し、ローカルまたはGCSから読み込みストリームを開く
 	rc, err := inputReader.Open(ctx, inputPath)
 	if err != nil {
 		return fmt.Errorf("入力ストリームのオープンに失敗しました (%s): %w", inputPath, err)
 	}
 	defer rc.Close() // 読み込みストリームは必ずクローズする
 
-	// 4. 出力先の決定
-	var writer io.Writer
+	// 4. 出力先の決定とデータの転送
 	var outputTarget string
 
 	if remoteReadFlags.OutputFilename != "" {
-		// ファイルに出力する場合
-		file, err := os.Create(remoteReadFlags.OutputFilename)
-		if err != nil {
-			return fmt.Errorf("出力ファイルの作成に失敗しました: %w", err)
-		}
-		defer file.Close()
+		outputPath := remoteReadFlags.OutputFilename
 
-		writer = file
-		outputTarget = remoteReadFlags.OutputFilename
+		if strings.HasPrefix(outputPath, "gs://") {
+			// GCS URIが指定された場合: GCSOutputWriterを使用し、io.CopyをWriteToGCS内で実行させる
+
+			outputWriter, err := clientFactory.NewOutputWriter()
+			if err != nil {
+				return fmt.Errorf("GCSOutputWriterの作成に失敗しました: %w", err)
+			}
+
+			// URIをバケット名とオブジェクトパスにパース
+			bucket, object, err := outputWriter.ParseGCSURI(outputPath)
+			if err != nil {
+				return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
+			}
+
+			outputTarget = outputPath
+			slog.Info("読み込み元: %s -> 出力先(GCS): %s", inputPath, outputTarget)
+
+			// ★修正: WriteToGCS に読み込みストリーム (rc) を渡して書き込みを実行させる
+			// Content-Type はここでは空文字列を指定し、Writer側でデフォルト値が適用されるようにする
+			if err := outputWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
+				return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
+			}
+
+			// GCSへの書き込みが完了したため、ここで処理を終了する
+			return nil
+
+		} else {
+			// ローカルファイルが指定された場合: os.Createを使用する
+			file, err := os.Create(outputPath)
+			if err != nil {
+				return fmt.Errorf("出力ファイルの作成に失敗しました: %w", err)
+			}
+			defer file.Close()
+
+			writer := file // ローカル書き込み用ライターを定義
+			outputTarget = outputPath
+			slog.Info("読み込み元: %s -> 出力先(ローカル): %s", inputPath, outputTarget)
+
+			// 5. 読み込みと書き込みの実行 (ローカルファイルの場合)
+			if _, err := io.Copy(writer, rc); err != nil {
+				return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
+			}
+			return nil
+		}
 	} else {
 		// 標準出力に出力する場合
-		writer = os.Stdout
+		writer := os.Stdout // 標準出力ライターを定義
 		outputTarget = "標準出力 (stdout)"
-	}
-	slog.Info("読み込み元: %s -> 出力先: %s", inputPath, outputTarget)
+		slog.Info("読み込み元: %s -> 出力先: %s", inputPath, outputTarget)
 
-	// 5. 読み込みと書き込みの実行
-	// io.Copy を使用して効率的にストリームを転送
-	if _, err := io.Copy(writer, rc); err != nil {
-		return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
+		// 5. 読み込みと書き込みの実行 (標準出力の場合)
+		if _, err := io.Copy(writer, rc); err != nil {
+			return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
+		}
+		return nil
 	}
-
-	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"cloud.google.com/go/storage"
 )
@@ -20,6 +21,7 @@ type GCSOutputWriter interface {
 	// WriteToGCS は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツを書き込みます。
 	// contentType は書き込むコンテンツのMIMEタイプを指定します。
 	WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
+	ParseGCSURI(uri string) (bucketName string, objectPath string, err error)
 }
 
 // =================================================================
@@ -76,6 +78,34 @@ func (w *GCSFileWriter) WriteToGCS(ctx context.Context, bucketName, objectPath s
 	}
 
 	return nil
+}
+
+// ParseGCSURI は、指定されたgs://URIをバケット名とオブジェクトパスにパースします。
+// URIが "gs://" で始まっていない場合、または形式が正しくない場合はエラーを返します。
+func (w *GCSFileWriter) ParseGCSURI(uri string) (bucketName string, objectPath string, err error) {
+	// 1. プレフィックスのチェック
+	if !strings.HasPrefix(uri, "gs://") {
+		return "", "", fmt.Errorf("無効なGCS URI形式: 'gs://'で始まる必要があります")
+	}
+
+	// 2. "gs://" を除去
+	path := uri[5:]
+
+	// 3. 最初の '/' でバケット名とオブジェクトパスに分割
+	idx := strings.Index(path, "/")
+	if idx == -1 {
+		// "gs://bucket" のようにオブジェクトパスがない場合
+		return path, "", nil
+	}
+
+	bucketName = path[:idx]
+	objectPath = path[idx+1:] // "/" の次から最後まで
+
+	if bucketName == "" {
+		return "", "", fmt.Errorf("GCS URIのバケット名が空です: %s", uri)
+	}
+
+	return bucketName, objectPath, nil
 }
 
 // 型アサーションチェック: GCSFileWriter が GCSOutputWriter インターフェースを満たしていることを確認

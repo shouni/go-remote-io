@@ -9,11 +9,12 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 このライブラリは、アプリケーションの I/O 依存性を抽象化し、ビジネスロジックから GCS とローカルファイルの判別ロジックを分離します。
 
-**主要な機能と特徴 (`package remoteio`):**
+**主要な機能と特徴:**
 
-* **統一された入力インターフェース**: `InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても透過的に `io.ReadCloser` を開きます。**この処理は全てファクトリを介して依存性注入されます。**
-* **GCSストリーム書き込み (強化)**: `GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
-* **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存しますが、I/Oロジック自体は純粋にこのパッケージ内で完結します。
+* **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
+* **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
+* **GCSストリーム書き込み (強化)**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
+* **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
 -----
 
@@ -29,7 +30,7 @@ go get github.com/shouni/go-remote-io
 
 ### 2\. 利用方法（InputReader の例）
 
-`InputReader` を利用することで、パス文字列のプレフィックス判定（`gs://`）ロジックをアプリケーションから分離できます。
+`factory.Factory` を初期化し、そこから `NewInputReader()` メソッドを使ってコンポーネントを取得します。
 
 ```go
 package main
@@ -40,22 +41,31 @@ import (
     "io"
     "log"
 
-    "cloud.google.com/go/storage"
-    "github.com/shouni/go-remote-io/pkg/remoteio"
+    "github.com/shouni/go-remote-io/pkg/factory" 
 )
 
 func main() {
     ctx := context.Background()
 
-    // 1. GCSクライアントの初期化（これは通常、ファクトリで行う）
-    gcsClient, err := storage.NewClient(ctx)
+    // 1. Factoryの初期化
+    // GCSクライアントの初期化と管理をFactoryに委譲
+    clientFactory, err := factory.NewClientFactory(ctx)
     if err != nil {
-        log.Fatalf("GCSクライアント初期化失敗: %v", err)
+        log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer gcsClient.Close()
+    // ★修正: FactoryのClose()をdeferで呼び出し、リソースを解放する
+    defer func() {
+        if closeErr := clientFactory.Close(); closeErr != nil {
+            log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
+        }
+    }()
     
-    // 2. remoteio.InputReader の実装を取得
-    reader := remoteio.NewLocalGCSInputReader(gcsClient)
+    // 2. InputReader の実装を取得
+    // ★修正: NewInputReader() メソッドを使用
+    reader, err := clientFactory.NewInputReader()
+    if err != nil {
+        log.Fatalf("InputReader生成失敗: %v", err)
+    }
     
     // 3. ローカルファイル、または GCS URI のどちらでも利用可能
     paths := []string{"./local_file.txt", "gs://my-bucket/remote_data.csv"}
@@ -76,7 +86,7 @@ func main() {
 
 ### 3\. 利用方法（GCSOutputWriter の例）
 
-`GCSOutputWriter` を利用して、任意の `io.Reader` から GCS にコンテンツを書き込みます。
+`factory.NewOutputWriter()` を使用して `GCSOutputWriter` を取得します。
 
 ```go
 package main
@@ -86,22 +96,30 @@ import (
     "context"
     "log"
     
-    "cloud.google.com/go/storage"
-    "github.com/shouni/go-remote-io/pkg/remoteio"
+    // 適切なモジュールパスを使用
+    "github.com/shouni/go-remote-io/pkg/factory"
 )
 
 func main() {
     ctx := context.Background()
 
-    // 1. GCSクライアントの初期化
-    gcsClient, err := storage.NewClient(ctx)
+    // 1. Factoryの初期化とクローズ
+    clientFactory, err := factory.NewClientFactory(ctx)
     if err != nil {
-        log.Fatalf("GCSクライアント初期化失敗: %v", err)
+        log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer gcsClient.Close()
+    defer func() {
+        if closeErr := clientFactory.Close(); closeErr != nil {
+            log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
+        }
+    }()
     
-    // 2. remoteio.GCSOutputWriter の実装を取得
-    writer := remoteio.NewGCSFileWriter(gcsClient)
+    // 2. GCSOutputWriter の実装を取得
+    // ★修正: NewOutputWriter() メソッドを使用
+    writer, err := clientFactory.NewOutputWriter()
+    if err != nil {
+        log.Fatalf("OutputWriter生成失敗: %v", err)
+    }
     
     // 3. 書き込むデータとメタデータの準備
     content := "これはGCSにアップロードされるテストコンテンツです。"
@@ -124,29 +142,26 @@ func main() {
 
 ## 📐 ライブラリ構成
 
-CLIアプリケーションではなく、再利用可能なパッケージとして機能が特化しています。
+CLIアプリケーションのエントリポイントを含む、再利用可能なパッケージ構成です。
 
 ```
 go-remote-io/
-├── go.mod
-├── go.sum
-├── README.md
 ├── pkg/
 │   ├── remoteio/
 │   │   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
 │   │   └── writer.go   # GCSOutputWriter インターフェースと GCSFileWriter の実装
 │   └── factory/
-│       └── factory.go   # ClientFactory による依存性注入（DI）とリソース管理
-└── cmd/ (オプション: テスト/デモ用 CLI)
-    └── root.go
+│       └── factory.go   # Factory インターフェースと ClientFactory によるDIとリソース管理
+└── cmd/ 
+    └── root.go          # CLIアプリケーション (remoteio) のエントリポイント
 ```
 
 ### 外部依存パッケージ
 
 本ライブラリは、以下の主要な外部パッケージに依存しています。
 
-* **`cloud.google.com/go/storage`**: Google Cloud Storage へのアクセスを処理します。（**コアライブラリ依存**）
-* **その他**: CLIアプリケーション (`cmd/`) は、`github.com/spf13/cobra` および `github.com/shouni/go-cli-base` に依存しています。
+* **GCSコア依存**: `cloud.google.com/go/storage` (Google Cloud Storage へのアクセス)
+* **CLI依存**: `github.com/spf13/cobra` および `github.com/shouni/go-cli-base` (`cmd/` パッケージで使用)
 
 -----
 

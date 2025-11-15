@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -36,15 +37,14 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
 
-	// 1. ClientFactory の取得 (DIされた依存関係の利用)
-	clientFactory, err := GetClientFactory(ctx)
+	// 1. ClientFactory の取得
+	clientFactory, err := GetFactoryFromContext(ctx)
 	if err != nil {
-		// Factoryが取得できない場合、GCS依存の機能は実行不可。
 		return err
 	}
 
 	// 2. InputReader の取得 (依存性の注入)
-	inputReader, err := clientFactory.GetRemoteInputReader()
+	inputReader, err := clientFactory.NewInputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
@@ -76,7 +76,7 @@ func runRemoteRead(cmd *cobra.Command, args []string) error {
 		writer = os.Stdout
 		outputTarget = "標準出力 (stdout)"
 	}
-	fmt.Fprintf(os.Stderr, "読み込み元: %s -> 出力先: %s\n", inputPath, outputTarget)
+	slog.Info("読み込み元: %s -> 出力先: %s", inputPath, outputTarget)
 
 	// 5. 読み込みと書き込みの実行
 	// io.Copy を使用して効率的にストリームを転送

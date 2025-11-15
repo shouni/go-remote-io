@@ -39,7 +39,7 @@ func (f *ClientFactory) Close() error {
 	return nil
 }
 
-// GetGCSClient は、ファクトリが保持するGCSクライアントを返します。（エラーメッセージ改善）
+// GetGCSClient は、ファクトリが保持するGCSクライアントを返します。
 func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされています")
@@ -47,7 +47,7 @@ func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
 	return f.gcsClient, nil
 }
 
-// GetRemoteInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。（エラーメッセージ改善）
+// GetRemoteInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。
 func (f *ClientFactory) GetRemoteInputReader() (remoteio.InputReader, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、InputReaderを生成できません")
@@ -55,7 +55,7 @@ func (f *ClientFactory) GetRemoteInputReader() (remoteio.InputReader, error) {
 	return remoteio.NewLocalGCSInputReader(f.gcsClient), nil
 }
 
-// GetGCSOutputWriter は、GCSクライアントを注入した GCSOutputWriter の具象実装を返します。（エラーメッセージ改善）
+// GetGCSOutputWriter は、GCSクライアントを注入した GCSOutputWriter の具象実装を返します。
 func (f *ClientFactory) GetGCSOutputWriter() (remoteio.GCSOutputWriter, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、GCSOutputWriterを生成できません")

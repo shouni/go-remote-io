@@ -14,9 +14,9 @@ type Factory interface {
 	Client() (*storage.Client, error)
 	// NewInputReader は GCSクライアントを注入した InputReader を生成します。
 	NewInputReader() (remoteio.InputReader, error)
-	// NewOutputWriter は GCSクライアントを注入した GCSOutputWriter を生成します。
-	// 具象型は LocalOutputWriter も満たす必要があります。
-	NewOutputWriter() (remoteio.GCSOutputWriter, error)
+	// NewOutputWriter は GCSクライアントを注入した OutputWriter を生成します。
+	// OutputWriter は GCSOutputWriter と LocalOutputWriter の両方を満たします。
+	NewOutputWriter() (remoteio.OutputWriter, error)
 	// Close は保持しているリソースを解放します。
 	Close() error
 }
@@ -68,10 +68,10 @@ func (f *ClientFactory) NewInputReader() (remoteio.InputReader, error) {
 
 // NewOutputWriter は、GCSクライアントを注入した UniversalIOWriter の具象実装を返します。
 // UniversalIOWriter は GCSOutputWriter と LocalOutputWriter の両方を満たします。
-func (f *ClientFactory) NewOutputWriter() (remoteio.GCSOutputWriter, error) {
+func (f *ClientFactory) NewOutputWriter() (remoteio.OutputWriter, error) {
 	if f.gcsClient == nil {
-		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、GCSOutputWriterを生成できません")
+		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、OutputWriterを生成できません")
 	}
-	// ★修正: UniversalIOWriter を返す
+
 	return remoteio.NewUniversalIOWriter(f.gcsClient), nil
 }

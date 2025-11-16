@@ -15,8 +15,8 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **統一された出力インターフェース (更新)**: **`remoteio.OutputWriter`** インターフェースを提供します。これは、**`GCSOutputWriter`** と **`LocalOutputWriter`** の両方を満たす汎用的な契約であり、アプリケーションのビジネスロジックは出力先の種類（GCSかローカルか）を知る必要がありません。
-* **GCSストリーム書き込み**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（未指定の場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
+* **統一された出力インターフェース**: **`remoteio.OutputWriter`** インターフェースを提供します。これは、**`GCSOutputWriter`** と **`LocalOutputWriter`** の両方を満たす汎用的な契約であり、アプリケーションのビジネスロジックは出力先の種類（GCSかローカルか）を知る必要がありません。
+* **GCSストリーム書き込み**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（空文字列を指定した場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
 -----
@@ -86,9 +86,9 @@ func main() {
 }
 ```
 
-### 3\. 利用方法（OutputWriter の例）
+### 3\. 利用方法（OutputWriter の例: GCS）
 
-`factory.NewOutputWriter()` を使用して **`remoteio.OutputWriter`** を取得します。CLIなどの上位レイヤーでは、出力先URIに応じて適切なインターフェースにキャストして利用します。
+`factory.NewOutputWriter()` を使用して **`remoteio.OutputWriter`** を取得し、GCS URIの場合のロジックを示します。
 
 ```go
 package main
@@ -97,7 +97,6 @@ import (
     "bytes"
     "context"
     "log"
-    "strings"
     
     "github.com/shouni/go-remote-io/pkg/factory"
     "github.com/shouni/go-remote-io/pkg/remoteio" 
@@ -111,13 +110,9 @@ func main() {
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer func() {
-        if closeErr := clientFactory.Close(); closeErr != nil {
-            log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
-        }
-    }()
-    
-    // 2. OutputWriter の実装を取得（汎用インターフェース）
+    defer clientFactory.Close() // defer Close() は省略
+
+    // 2. OutputWriter の実装を取得
     outputURI := "gs://my-output-bucket/output/result.txt"
     
     rawWriter, err := clientFactory.NewOutputWriter()
@@ -125,39 +120,82 @@ func main() {
         log.Fatalf("OutputWriter生成失敗: %v", err)
     }
     
-    // 3. URIを判別し、適切なインターフェースにキャストして書き込み
-    content := "これはテストコンテンツです。"
-    reader := bytes.NewReader([]byte(content))
-
-    if strings.HasPrefix(outputURI, "gs://") {
-        // GCSの場合: GCSOutputWriterにキャスト
-        writer, ok := rawWriter.(remoteio.GCSOutputWriter)
-        if !ok {
-            log.Fatalf("Factoryが GCSOutputWriter インターフェースを提供していません。")
-        }
-        
-        // GCS URIをパースするロジック（実際には remoteio.ParseGCSURI を利用）
-        bucketName := "my-output-bucket"
-        objectPath := "output/result.txt"
-        
-        log.Printf("GCSへ書き込み開始: %s", outputURI)
-        if err := writer.WriteToGCS(ctx, bucketName, objectPath, reader, "text/plain"); err != nil {
-            log.Fatalf("GCSへの書き込みに失敗しました: %v", err)
-        }
-        log.Println("GCSへの書き込みが完了しました。")
-        
-    } else {
-        // ローカルの場合: LocalOutputWriterにキャスト
-        writer, ok := rawWriter.(remoteio.LocalOutputWriter)
-        if !ok {
-            log.Fatalf("Factoryが LocalOutputWriter インターフェースを提供していません。")
-        }
-        log.Printf("ローカルへ書き込み開始: %s", outputURI)
-        if err := writer.WriteToLocal(ctx, outputURI, reader); err != nil {
-             log.Fatalf("ローカルへの書き込みに失敗しました: %v", err)
-        }
-        log.Println("ローカルへの書き込みが完了しました。")
+    // 3. GCSへの書き込み（GCSOutputWriterにキャスト）
+    writer, ok := rawWriter.(remoteio.GCSOutputWriter)
+    if !ok {
+        log.Fatalf("Factoryが GCSOutputWriter インターフェースを提供していません。")
     }
+    
+    // ★ 修正: remoteio.ParseGCSURI を使用してURIをパース
+    bucketName, objectPath, err := remoteio.ParseGCSURI(outputURI)
+    if err != nil {
+        log.Fatalf("GCS URIのパースに失敗しました: %v", err)
+    }
+    
+    // 4. 書き込み実行
+    content := "これはGCSにアップロードされるテストコンテンツです。"
+    reader := bytes.NewReader([]byte(content))
+    
+    // ★ 修正: ContentTypeに空文字列を渡し、デフォルトのMIMEタイプを適用
+    contentType := "" 
+    
+    log.Printf("GCSへ書き込み開始: gs://%s/%s", bucketName, objectPath)
+    if err := writer.WriteToGCS(ctx, bucketName, objectPath, reader, contentType); err != nil {
+        log.Fatalf("GCSへの書き込みに失敗しました: %v", err)
+    }
+    log.Println("GCSへの書き込みが完了しました。")
+}
+```
+
+### 4\. 利用方法（OutputWriter の例: ローカル）
+
+`factory.NewOutputWriter()` を使用して **`remoteio.OutputWriter`** を取得し、ローカルファイルの場合のロジックを示します。
+
+```go
+package main
+
+import (
+    "bytes"
+    "context"
+    "log"
+    
+    "github.com/shouni/go-remote-io/pkg/factory"
+    "github.com/shouni/go-remote-io/pkg/remoteio" 
+)
+
+func main() {
+    ctx := context.Background()
+
+    // 1. Factoryの初期化とクローズ
+    clientFactory, err := factory.NewClientFactory(ctx)
+    if err != nil {
+        log.Fatalf("Factory初期化失敗: %v", err)
+    }
+    defer clientFactory.Close() // defer Close() は省略
+
+    // 2. OutputWriter の実装を取得
+    outputURI := "./output/local_result.txt" // ローカル出力先
+    
+    rawWriter, err := clientFactory.NewOutputWriter()
+    if err != nil {
+        log.Fatalf("OutputWriter生成失敗: %v", err)
+    }
+    
+    // 3. ローカルへの書き込み（LocalOutputWriterにキャスト）
+    writer, ok := rawWriter.(remoteio.LocalOutputWriter)
+    if !ok {
+        log.Fatalf("Factoryが LocalOutputWriter インターフェースを提供していません。")
+    }
+    
+    // 4. 書き込み実行
+    content := "これはローカルファイルに書き込まれるテストコンテンツです。"
+    reader := bytes.NewReader([]byte(content))
+    
+    log.Printf("ローカルへ書き込み開始: %s", outputURI)
+    if err := writer.WriteToLocal(ctx, outputURI, reader); err != nil {
+        log.Fatalf("ローカルへの書き込みに失敗しました: %v", err)
+    }
+    log.Println("ローカルへの書き込みが完了しました。")
 }
 ```
 

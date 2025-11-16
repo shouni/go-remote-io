@@ -15,7 +15,7 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **統一された出力インターフェース**: **`remoteio.OutputWriter`** インターフェースを提供します。これは、**`GCSOutputWriter`** と **`LocalOutputWriter`** の両方を満たす汎用的な契約であり、アプリケーションのビジネスロジックは出力先の種類（GCSかローカルか）を知る必要がありません。
+* **統一された出力インターフェース (修正)**: `remoteio.OutputWriter` インターフェースを提供します。これは、`GCSOutputWriter` と `LocalOutputWriter` の両方を満たす汎用的な契約ですが、具体的な書き込み操作を行うためには、ファクトリが返す具象型を**適切なインターフェース（`GCSOutputWriter` または `LocalOutputWriter`）にキャスト**する必要があります。
 * **GCSストリーム書き込み**: `remoteio.GCSOutputWriter` は `io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。これにより、大規模なデータ処理時のメモリ効率が向上します。また、**MIMEタイプを動的に指定**可能です（空文字列を指定した場合は `text/plain; charset=utf-8` がデフォルトで適用されます）。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
@@ -110,8 +110,8 @@ func main() {
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer clientFactory.Close() // defer Close() は省略
-
+    defer clientFactory.Close() // リソース解放のため、必ず呼び出す
+    
     // 2. OutputWriter の実装を取得
     outputURI := "gs://my-output-bucket/output/result.txt"
     
@@ -126,17 +126,17 @@ func main() {
         log.Fatalf("Factoryが GCSOutputWriter インターフェースを提供していません。")
     }
     
-    // ★ 修正: remoteio.ParseGCSURI を使用してURIをパース
+    // 4. URIをパース
     bucketName, objectPath, err := remoteio.ParseGCSURI(outputURI)
     if err != nil {
         log.Fatalf("GCS URIのパースに失敗しました: %v", err)
     }
     
-    // 4. 書き込み実行
+    // 5. 書き込み実行
     content := "これはGCSにアップロードされるテストコンテンツです。"
     reader := bytes.NewReader([]byte(content))
     
-    // ★ 修正: ContentTypeに空文字列を渡し、デフォルトのMIMEタイプを適用
+    // ContentTypeに空文字列を渡し、デフォルトのMIMEタイプを適用
     contentType := "" 
     
     log.Printf("GCSへ書き込み開始: gs://%s/%s", bucketName, objectPath)
@@ -171,8 +171,8 @@ func main() {
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer clientFactory.Close() // defer Close() は省略
-
+    defer clientFactory.Close() // リソース解放のため、必ず呼び出す
+    
     // 2. OutputWriter の実装を取得
     outputURI := "./output/local_result.txt" // ローカル出力先
     

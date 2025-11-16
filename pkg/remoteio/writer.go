@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"cloud.google.com/go/storage"
 )
@@ -17,9 +18,13 @@ const DefaultContentType = "text/plain; charset=utf-8"
 // 1. インターフェース定義
 // =================================================================
 
-// OutputWriter は、GCSOutputWriter と LocalOutputWriter の両方の機能を組み合わせて
-// GCSおよびローカルファイルシステムへの書き込みを抽象化する汎用インターフェースです。
+// OutputWriter は、GCSおよびローカルファイルシステムへの書き込みを抽象化する汎用インターフェースです。
 type OutputWriter interface {
+	// Write は、GCSまたはローカルファイルパス(uri)を受け取り、データ(reader)を書き込みます。
+	// GCSOutputWriterとLocalOutputWriterのメソッドは、歴史的経緯や詳細な制御のために残すことができますが、
+	// 汎用的な利用には Write を推奨します。
+	Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error
+
 	GCSOutputWriter
 	LocalOutputWriter
 }
@@ -55,6 +60,22 @@ func NewUniversalIOWriter(client *storage.Client) *UniversalIOWriter {
 // =================================================================
 // 3. コアロジック (実装)
 // =================================================================
+
+// Write は OutputWriter インターフェースの汎用メソッドを実装します。
+// パスのプレフィックスを見て WriteToGCS または WriteToLocal へ処理を委譲します。
+func (w *UniversalIOWriter) Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error {
+	if strings.HasPrefix(uri, "gs://") {
+		// GCSへの書き込み
+		bucketName, objectPath, err := ParseGCSURI(uri)
+		if err != nil {
+			return fmt.Errorf("GCS URIのパース失敗: %w", err)
+		}
+		return w.WriteToGCS(ctx, bucketName, objectPath, contentReader, contentType)
+	} else {
+		// ローカルファイルへの書き込み (contentTypeは無視される)
+		return w.WriteToLocal(ctx, uri, contentReader)
+	}
+}
 
 // WriteToGCS は GCSOutputWriter インターフェースを実装します。
 func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {

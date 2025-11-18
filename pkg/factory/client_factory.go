@@ -10,8 +10,10 @@ import (
 
 // Factory インターフェースの定義
 type Factory interface {
-	// Client はファクトリが保持するGCSクライアントを返します。
-	Client() (*storage.Client, error)
+	// GetGCSClient はファクトリが保持するGCSクライアントを返します。
+	GetGCSClient() (*storage.Client, error)
+	// NewURLSigner は GCSクライアントを注入した URLSigner を生成します。
+	NewURLSigner() (remoteio.URLSigner, error) //
 	// NewInputReader は GCSクライアントを注入した InputReader を生成します。
 	NewInputReader() (remoteio.InputReader, error)
 	// NewOutputWriter は GCSクライアントを注入した OutputWriter を生成します。
@@ -49,13 +51,22 @@ func (f *ClientFactory) Close() error {
 	return nil
 }
 
-// Client は、ファクトリが保持するGCSクライアントを返します。
-func (f *ClientFactory) Client() (*storage.Client, error) {
+// GetGCSClient は、ファクトリが保持するGCSクライアントを返します。
+func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
 	if f.gcsClient == nil {
 		// クライアントがnilの場合、NewClientFactoryの失敗、またはClose()が呼び出されたことを意味する
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされています")
 	}
 	return f.gcsClient, nil
+}
+
+// NewURLSigner は、GCSクライアントを注入した URLSigner の具象実装を返します。
+func (f *ClientFactory) NewURLSigner() (remoteio.URLSigner, error) { // ✅ 実装を追加
+	if f.gcsClient == nil {
+		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、URLSignerを生成できません")
+	}
+	// 記憶している remoteio.NewGCSURLSigner を使用
+	return remoteio.NewGCSURLSigner(f.gcsClient), nil
 }
 
 // NewInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。

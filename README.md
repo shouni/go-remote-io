@@ -15,7 +15,8 @@ Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ロー�
 
 * **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **統一された出力インターフェース (🎉 New)**: `remoteio.OutputWriter` インターフェースを提供します。このインターフェースは**汎用的な `Write(ctx, uri, reader, contentType)` メソッド**を核とします。URIに `gs://` が含まれていれば GCS へ、そうでなければローカルファイルへ、ライブラリ内部で**透過的に**書き込みを処理します。**呼び出し元（利用側）でのURI判別や型アサートは一切不要**です。
+* **統一された出力インターフェース**: `remoteio.OutputWriter` インターフェースを提供します。このインターフェースは**汎用的な `Write(ctx, uri, reader, contentType)` メソッド**を核とします。URIに `gs://` が含まれていれば GCS へ、そうでなければローカルファイルへ、ライブラリ内部で**透過的に**書き込みを処理します。**呼び出し元（利用側）でのURI判別や型アサートは一切不要**です。
+* **期限付きURLの生成**: `remoteio.URLSigner` インターフェースを提供します。これにより、GCS URIに対して**期限付きの署名付きURL (Signed URL)** を生成できます。これは、アプリケーションが認証なしで一時的にコンテンツを公開したい場合に非常に有用です。
 * **GCSストリーム書き込み**: `GCSOutputWriter` の機能（現在は `OutputWriter` に統合）を利用し、`io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。**MIMEタイプを動的に指定**可能です。
 * **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
@@ -86,7 +87,7 @@ func main() {
 
 ### 3\. 利用方法（OutputWriter の例: 統一された書き込み）
 
-URIが**GCS でもローカルでも、同じ** `writer.Write()` メソッドで処理できます。**ビジネスロジックは書き込み先の詳細を知る必要がありません。
+URIが**GCS でもローカルでも、同じ** `writer.Write()` メソッドで処理できます。**ビジネスロジックは書き込み先の詳細を知る必要がありません。**
 
 ```go
 package main
@@ -137,6 +138,48 @@ func main() {
         log.Fatalf("ローカルへの書き込みに失敗しました: %v", err)
     }
     log.Printf("✅ ローカルへの書き込みが完了しました: %s", localPath)
+}
+```
+
+### 4\. 利用方法（URLSigner の例: 期限付きURLの生成）
+
+`factory.Factory` から **`NewURLSigner()`** メソッドを使って署名付きURL生成コンポーネントを取得します。
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+
+	"github.com/shouni/go-remote-io/pkg/factory"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // 1. Factoryの初期化
+    clientFactory, _ := factory.NewClientFactory(ctx)
+    defer clientFactory.Close()
+    
+    // 2. URLSigner の実装を取得 (GCSクライアントに依存)
+    signer, err := clientFactory.NewURLSigner()
+    if err != nil {
+        log.Fatalf("URLSigner生成失敗: %v", err)
+    }
+    
+    // 3. 署名付きURLを生成
+    gcsURI := "gs://my-bucket/public_report.pdf"
+    expires := 15 * time.Minute
+    
+    // 注意: 生成にはサービスアカウントの認証が必要です
+    signedURL, err := signer.GenerateSignedURL(ctx, gcsURI, "GET", expires)
+    if err != nil {
+        log.Fatalf("署名付きURL生成失敗: %v", err)
+    }
+
+    log.Printf("✅ 署名付きURL (15分間有効) : %s", signedURL)
 }
 ```
 
@@ -197,6 +240,7 @@ go-remote-io/
 │   ├── remoteio/
 │   │   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
 │   │   ├── writer.go   # OutputWriter (GCS/Local) インターフェースと具象実装
+│   │   ├── signer.go   # URLSigner インターフェースと GCS 署名付きURL生成の実装
 │   │   └── uri.go      # GCS URI判定・パースユーティリティ (IsGCSURI, ParseGCSURI)
 │   └── factory/
 │       └── factory.go   # Factory インターフェースと ClientFactory によるDIとリソース管理

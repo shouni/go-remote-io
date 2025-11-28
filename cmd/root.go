@@ -1,102 +1,191 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
-	"github.com/shouni/go-remote-io/pkg/remoteio"
+	clibase "github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
+
+	"github.com/shouni/go-remote-io/pkg/factory"
+	"github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
-// gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
-var gcsCopyCmd = &cobra.Command{
-	Use:   "gcs-copy [source_path]",
-	Short: "GCS/ローカルパス間で内容を読み込み、指定された GCS/ローカルパスへ転送します。",
-	Long: `GCS URI (gs://) またはローカルファイルパスを扱います。
-このコマンドは GCS専用ファクトリに依存し、S3 URIはサポートしません。`,
-	Args: cobra.ExactArgs(1),
-	RunE: runGCSCopy,
+const (
+	appName           = "remoteio" // アプリ名
+	defaultTimeoutSec = 10         // 秒
+)
+
+// =================================================================
+// 1. グローバル変数とコンテキストキーの定義
+// =================================================================
+
+// FactoryKey は context.Context に factory.Factory (GCS専用) を格納・取得するための非公開キー
+type FactoryKey struct{}
+
+// S3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
+type S3FactoryKey struct{}
+
+// ClientFactoryInstance は Close() のために GCS/S3 クライアントインスタンスを一時的に保持するインターフェース
+type ClientFactoryInstance interface {
+	io.Closer
 }
 
-func init() {
-	// フラグは共通のものを使用
-	gcsCopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+// rcopyFlags は gcsCopyCmd や s3CopyCmd で共有されるフラグを保持します。
+type rcopyFlags struct {
+	OutputFilename string // -o, --output 出力ファイル名
 }
 
-// runGCSCopy は gcs-copy コマンドの実行ロジックです。
-func runGCSCopy(cmd *cobra.Command, args []string) error {
+var flags rcopyFlags // ★問題点15の修正: flags変数をグローバルに定義
+
+// AppFlags はこのアプリケーション固有の永続フラグを保持
+type AppFlags struct {
+	TimeoutSec int // --timeout ClientFactory初期化時のコンテキストタイムアウト（秒）
+}
+
+var appFlags AppFlags
+
+// =================================================================
+// 2. Factoryの取得ヘルパー関数
+// =================================================================
+
+// GetFactoryFromContext は、cmd.Context() から factory.Factory (GCS専用) を取り出します。
+func GetFactoryFromContext(ctx context.Context) (factory.Factory, error) {
+	val := ctx.Value(FactoryKey{})
+	if val == nil {
+		return nil, fmt.Errorf("コンテキストにGCSファクトリが見つかりません。")
+	}
+	f, ok := val.(factory.Factory)
+	if !ok {
+		return nil, fmt.Errorf("コンテキストの値が期待される型 (factory.Factory) ではありません。")
+	}
+	return f, nil
+}
+
+// GetS3FactoryFromContext は、cmd.Context() から s3factory.Factory (S3専用) を取り出します。
+func GetS3FactoryFromContext(ctx context.Context) (s3factory.Factory, error) {
+	val := ctx.Value(S3FactoryKey{})
+	if val == nil {
+		return nil, fmt.Errorf("コンテキストにS3ファクトリが見つかりません。")
+	}
+	f, ok := val.(s3factory.Factory)
+	if !ok {
+		return nil, fmt.Errorf("コンテキストの値が期待される型 (s3factory.Factory) ではありません。")
+	}
+	return f, nil
+}
+
+// =================================================================
+// 3. ルートコマンドの定義
+// =================================================================
+
+// rootCmd の定義
+var rootCmd = &cobra.Command{
+	Use:   appName,
+	Short: "リモートI/O操作のためのCLIツール。",
+	Long:  "ローカルファイルとGCS/S3 URIをサポートする、リモートI/O操作のためのCLIツールです。",
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
+
+// addAppPersistentFlags は、アプリケーション固有の永続フラグをルートコマンドに追加します。
+func addAppPersistentFlags(rootCmd *cobra.Command) {
+	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "リモートリクエストのタイムアウト時間（秒）")
+}
+
+// initPersistentPreRunE は、GCSファクトリとS3ファクトリの両方を初期化し、Contextに格納します。
+func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	inputPath := args[0]
+	initCtx, cancel := context.WithTimeout(ctx, time.Duration(appFlags.TimeoutSec)*time.Second)
+	defer cancel()
 
-	// 1. GCS専用 Factory の取得
-	clientFactory, err := GetFactoryFromContext(ctx)
-	if err != nil {
-		return err
-	}
-
-	// 2. InputReader の取得
-	inputReader, err := clientFactory.NewInputReader()
-	if err != nil {
-		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
-	}
-
-	// 3. 読み込みストリームのオープン
-	rc, err := inputReader.Open(ctx, inputPath)
-	if err != nil {
-		return fmt.Errorf("入力ストリームのオープンに失敗しました (%s): %w", inputPath, err)
-	}
-	defer rc.Close()
-
-	// 4. 出力先の決定とデータの転送
-	outputPath := flags.OutputFilename
-
-	if outputPath == "" {
-		// 標準出力に出力する場合
-		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", "stdout"), slog.String("type", "Stdout"))
-		if _, err := io.Copy(os.Stdout, rc); err != nil {
-			return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
+	// 1. GCS Factory の初期化 (GCS Client)
+	gcsFactory, gcsErr := factory.NewClientFactory(initCtx)
+	if gcsErr == nil {
+		ctx = context.WithValue(ctx, FactoryKey{}, gcsFactory)
+		if clibase.Flags.Verbose {
+			slog.Info("GCS Factoryを初期化しました。", slog.String("client_type", "GCS"))
 		}
-		return nil
+	} else if clibase.Flags.Verbose {
+		slog.Warn("GCS Factoryの初期化をスキップしました。", slog.String("error", gcsErr.Error()))
 	}
 
-	// S3 URIチェック (このコマンドはS3を扱わないためエラーにする)
-	if remoteio.IsS3URI(inputPath) || remoteio.IsS3URI(outputPath) {
-		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
+	// 2. S3 Factory の初期化 (S3 Client)
+	s3Factory, s3Err := s3factory.NewS3ClientFactory(initCtx)
+	if s3Err == nil {
+		ctx = context.WithValue(ctx, S3FactoryKey{}, s3Factory)
+		if clibase.Flags.Verbose {
+			slog.Info("S3 Factoryを初期化しました。", slog.String("client_type", "S3"))
+		}
+	} else if clibase.Flags.Verbose {
+		slog.Warn("S3 Factoryの初期化をスキップしました。", slog.String("error", s3Err.Error()))
 	}
 
-	// --- GCS / ローカルファイルに出力する場合 ---
-	writer, err := clientFactory.NewOutputWriter()
-	if err != nil {
-		return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
+	// どちらのファクトリも初期化に失敗した場合はエラーを返す
+	if gcsErr != nil && s3Err != nil {
+		return fmt.Errorf("GCSファクトリとS3ファクトリの両方の初期化に失敗しました: GCS: %v, S3: %v", gcsErr, s3Err)
 	}
 
-	if remoteio.IsGCSURI(outputPath) {
-		// GCS URIが指定された場合
-		gcsWriter, ok := writer.(remoteio.GCSOutputWriter)
-		if !ok {
-			return fmt.Errorf("FactoryがGCS出力用のWriterインターフェース(remoteio.GCSOutputWriter)を提供していません")
-		}
-		bucket, object, _ := remoteio.ParseGCSURI(outputPath)
-		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "GCS"))
+	// 3. Context の更新とクリーンアップ用のインスタンス保持
+	cmd.SetContext(ctx)
 
-		if err := gcsWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
-			return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
-		}
-
-	} else {
-		// ローカルファイルが指定された場合
-		localWriter, ok := writer.(remoteio.LocalOutputWriter)
-		if !ok {
-			return fmt.Errorf("Factoryがローカルファイル出力用のWriterインターフェース(remoteio.LocalOutputWriter)を提供していません")
-		}
-		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "LocalFile"))
-
-		if err := localWriter.WriteToLocal(ctx, outputPath, rc); err != nil {
-			return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
-		}
-	}
+	// Close()のためにインスタンスを保持 (ここでは両方のクローズ処理を担うラッパーとして機能)
+	cmd.SetContext(context.WithValue(ctx, factoryInstanceKey{}, struct{ io.Closer }{io.Closer(gcsFactory)}))
+	cmd.SetContext(context.WithValue(ctx, s3FactoryInstanceKey{}, io.Closer(s3Factory)))
 
 	return nil
+}
+
+// factoryInstanceKey は GCS Factoryを Close() するために保持するキー
+type factoryInstanceKey struct{}
+
+// s3FactoryInstanceKey は S3 Factoryを Close() するために保持するキー
+type s3FactoryInstanceKey struct{}
+
+// =================================================================
+// 4. エントリポイント
+// =================================================================
+
+// Execute は、rootCmd を実行するメイン関数です。
+func Execute() {
+	// 1. 永続フラグの追加
+	addAppPersistentFlags(rootCmd)
+
+	// 2. PersistentPreRunE の設定 (両方のファクトリをコンテキストに注入)
+	rootCmd.PersistentPreRunE = initPersistentPreRunE
+
+	// 3. サブコマンドの登録
+	rootCmd.AddCommand(gcsCopyCmd)
+	rootCmd.AddCommand(s3CopyCmd)
+
+	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
+	defer func() {
+		// GCS Factoryのクローズ処理
+		if closer, ok := rootCmd.Context().Value(factoryInstanceKey{}).(io.Closer); ok && closer != nil {
+			if err := closer.Close(); err != nil {
+				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
+			} else if clibase.Flags.Verbose {
+				slog.Info("GCSクライアントをクローズしました。")
+			}
+		}
+
+		// S3 Factoryのクローズ処理 (S3 FactoryはClose()を持たないが、インターフェースを介して安全に呼び出す)
+		if closer, ok := rootCmd.Context().Value(s3FactoryInstanceKey{}).(io.Closer); ok && closer != nil {
+			if err := closer.Close(); err != nil {
+				slog.Info("警告: S3クライアントのクローズに失敗しました: %v", err)
+			} else if clibase.Flags.Verbose {
+				slog.Info("S3クライアントをクローズしました。")
+			}
+		}
+	}()
+
+	// 5. rootCmd.Execute() を直接呼び出します。
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

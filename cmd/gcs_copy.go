@@ -10,21 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rcopyFlags は rcopy コマンド固有のフラグを保持します。
-type rcopyFlags struct {
-	OutputFilename string // -o, --output 出力ファイル名
-}
-
-var flags rcopyFlags // フラグ変数の名前を 'flags' に変更
-
-// rcopyCmd は 'rcopy' サブコマンドを定義します。
-var rcopyCmd = &cobra.Command{
-	Use:   "rcopy [source_path]", // コマンド名を rcopy に変更
+// gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
+var gcsCopyCmd = &cobra.Command{
+	Use:   "gcs-copy [source_path]",
 	Short: "リモート/ローカルパス間で内容を読み込み、指定された出力先へ転送します。",
 	Long: `指定されたパス (ローカルファイル、または GCS URI) から io.ReadCloser を開きます。
 読み込んだ内容は、標準出力、ローカルファイル、または GCS URIで指定されたリモートパスへ転送されます。`,
 	Args: cobra.ExactArgs(1), // 1つのパス引数を必須とする
-	RunE: runRcopy,           // 実行関数名を runRcopy に変更
+	RunE: runGCSCopy,
 }
 
 func init() {
@@ -32,8 +25,8 @@ func init() {
 	rcopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
-// runRcopy は rcopy コマンドの実行ロジックです。
-func runRcopy(cmd *cobra.Command, args []string) error {
+// runGCSCopy は rcopy コマンドの実行ロジックです。
+func runGCSCopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
 

@@ -10,6 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// =================================================================
+// コマンド実装
+// =================================================================
+
 // s3CopyCmd は 's3-copy' サブコマンドを定義します。
 var s3CopyCmd = &cobra.Command{
 	Use:   "s3-copy [source_path]",
@@ -31,7 +35,6 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
 
 	// 1. S3専用 Factory の取得
-	// 注意: GetFactoryFromContextは factory.Factory を返すため、ここでは GetS3FactoryFromContext が必要
 	s3Factory, err := GetS3FactoryFromContext(ctx)
 	if err != nil {
 		return err

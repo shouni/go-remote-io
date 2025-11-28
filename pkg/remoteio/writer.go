@@ -157,8 +157,6 @@ func (w *UniversalIOWriter) WriteToS3(ctx context.Context, bucketName, objectPat
 		Key:         aws.String(objectPath),
 		Body:        contentReader,
 		ContentType: aws.String(contentType),
-		// ACLやStorageClassなどのオプションも必要に応じて追加可能
-		ACL: types.ObjectCannedACLBucketOwnerFullControl,
 	})
 
 	if err != nil {
@@ -206,7 +204,4 @@ func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, conte
 // 4. 型アサーションチェック
 // =================================================================
 
-// UniversalIOWriterがすべてのインターフェースを満たしていることを確認
-var _ GCSOutputWriter = (*UniversalIOWriter)(nil)
-var _ S3OutputWriter = (*UniversalIOWriter)(nil)
-var _ LocalOutputWriter = (*UniversalIOWriter)(nil)
+var _ OutputWriter = (*UniversalIOWriter)(nil)

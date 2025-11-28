@@ -101,14 +101,7 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 		}
 
 	} else {
-		// ローカルファイルが指定された場合 (ロジック変更なし)
-		localWriter, ok := writer.(remoteio.LocalOutputWriter)
-		if !ok {
-			return fmt.Errorf("Factoryがローカルファイル出力用のWriterインターフェース(remoteio.LocalOutputWriter)を提供していません")
-		}
-		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "LocalFile"))
-
-		if err := localWriter.WriteToLocal(ctx, outputPath, rc); err != nil {
+		if err := writer.WriteToLocal(ctx, outputPath, rc); err != nil {
 			return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
 		}
 	}

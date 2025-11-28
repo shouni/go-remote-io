@@ -37,8 +37,8 @@ type AppFlags struct {
 
 var appFlags AppFlags
 
-// factoryInstanceKey は GCS Factoryを Close() するために保持するキー
-type factoryInstanceKey struct{}
+// gcsFactoryCloserKey は GCS Factoryのクローズ処理のために io.Closer を保持するキー
+type gcsFactoryCloserKey struct{}
 
 // =================================================================
 // 2. Factoryの取得ヘルパー関数
@@ -105,7 +105,7 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 		// コンテキストに GCS Factory を格納
 		newCtx = context.WithValue(newCtx, gcsFactoryKey{}, gcsFactory)
 		// Close() のために GCS Factory を格納 (io.Closerを実装しているため)
-		newCtx = context.WithValue(newCtx, factoryInstanceKey{}, io.Closer(gcsFactory))
+		newCtx = context.WithValue(newCtx, gcsFactoryCloserKey{}, io.Closer(gcsFactory))
 
 		if clibase.Flags.Verbose {
 			slog.Info("GCS Factoryを初期化しました。", slog.String("client_type", "GCS"))
@@ -155,8 +155,7 @@ func Execute() {
 
 	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
 	defer func() {
-		// GCS Factoryのクローズ処理 (S3のクローズ処理は削除済み)
-		if closer, ok := rootCmd.Context().Value(factoryInstanceKey{}).(io.Closer); ok && closer != nil {
+		if closer, ok := rootCmd.Context().Value(gcsFactoryCloserKey{}).(io.Closer); ok && closer != nil {
 			if err := closer.Close(); err != nil {
 				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
 			} else if clibase.Flags.Verbose {

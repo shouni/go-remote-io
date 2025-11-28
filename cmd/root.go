@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -10,7 +11,8 @@ import (
 	clibase "github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
 
-	"github.com/shouni/go-remote-io/pkg/factory"
+	"github.com/shouni/go-remote-io/pkg/gcsfactory"
+	"github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 const (
@@ -18,25 +20,15 @@ const (
 	defaultTimeoutSec = 10         // 秒
 )
 
-// FactoryKey は context.Context に factory.Factory を格納・取得するための非公開キー
-type FactoryKey struct{} // ★修正なし: キーの型は適切
+// =================================================================
+// 1. グローバル変数とコンテキストキーの定義
+// =================================================================
 
-// GetFactoryFromContext は、cmd.Context() から factory.Factory を取り出す公開関数です。
-func GetFactoryFromContext(ctx context.Context) (factory.Factory, error) {
-	val := ctx.Value(FactoryKey{})
+// gcsFactoryKey は context.Context に gcsfactory.Factory (GCS専用) を格納・取得するための非公開キー
+type gcsFactoryKey struct{}
 
-	if val == nil {
-		return nil, fmt.Errorf("コンテキストにファクトリが見つかりません。")
-	}
-
-	// 型アサーションは factory.Factory インターフェースに対して行う
-	f, ok := val.(factory.Factory)
-	if !ok {
-		return nil, fmt.Errorf("コンテキストの値が期待される型 (factory.Factory) ではありません。")
-	}
-
-	return f, nil
-}
+// s3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
+type s3FactoryKey struct{}
 
 // AppFlags はこのアプリケーション固有の永続フラグを保持
 type AppFlags struct {
@@ -45,79 +37,127 @@ type AppFlags struct {
 
 var appFlags AppFlags
 
+// gcsFactoryCloserKey は GCS Factoryのクローズ処理のために io.Closer を保持するキー
+type gcsFactoryCloserKey struct{}
+
+// =================================================================
+// 2. Factoryの取得ヘルパー関数
+// =================================================================
+
+// GetFactoryFromContext は、cmd.Context() から gcsfactory.Factory (GCS専用) を取り出します。
+func GetFactoryFromContext(ctx context.Context) (gcsfactory.Factory, error) {
+	val := ctx.Value(gcsFactoryKey{})
+	if val == nil {
+		return nil, fmt.Errorf("コンテキストにGCSファクトリが見つかりません。")
+	}
+	f, ok := val.(gcsfactory.Factory)
+	if !ok {
+		return nil, fmt.Errorf("コンテキストの値が期待される型 (factory.Factory) ではありません。")
+	}
+	return f, nil
+}
+
+// GetS3FactoryFromContext は、cmd.Context() から s3factory.Factory (S3専用) を取り出します。
+func GetS3FactoryFromContext(ctx context.Context) (s3factory.Factory, error) {
+	val := ctx.Value(s3FactoryKey{})
+	if val == nil {
+		return nil, fmt.Errorf("コンテキストにS3ファクトリが見つかりません。")
+	}
+	f, ok := val.(s3factory.Factory)
+	if !ok {
+		return nil, fmt.Errorf("コンテキストの値が期待される型 (s3factory.Factory) ではありません。")
+	}
+	return f, nil
+}
+
+// =================================================================
+// 3. ルートコマンドの定義
+// =================================================================
+
 // rootCmd の定義
 var rootCmd = &cobra.Command{
 	Use:   appName,
 	Short: "リモートI/O操作のためのCLIツール。",
-	Long:  "ローカルファイルとGCS URIをサポートする、リモートI/O操作のためのCLIツールです。",
+	Long:  "ローカルファイルとGCS/S3 URIをサポートする、リモートI/O操作のためのCLIツールです。",
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
 }
 
-// --- アプリケーション固有のカスタム関数 ---
-
 // addAppPersistentFlags は、アプリケーション固有の永続フラグをルートコマンドに追加します。
 func addAppPersistentFlags(rootCmd *cobra.Command) {
-	// 1. アプリケーション固有フラグの登録
-	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
+	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "リモートリクエストのタイムアウト時間（秒）")
 }
 
-// initAppPreRunE は、clibase共通処理の後に実行される、アプリケーション固有のPersistentPreRunEです。
-// ここでFactoryを初期化し、Contextに格納します。
-func initAppPreRunE(cmd *cobra.Command, args []string) (factory.Factory, error) {
+// initPersistentPreRunE は、GCSファクトリとS3ファクトリの両方を初期化し、Contextに格納します。
+func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-
-	// GCSクライアント初期化のためのコンテキストを設定
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(appFlags.TimeoutSec)*time.Second)
-	defer cancel() // 必ずキャンセルを呼び出す
+	defer cancel()
 
-	// 2. Factory の初期化 (GCS Client が一度だけ作成される)
-	clientFactory, err := factory.NewClientFactory(initCtx)
-	if err != nil {
-		return nil, fmt.Errorf("ClientFactoryの初期化に失敗しました: %w", err)
+	newCtx := ctx
+	var gcsFactory gcsfactory.Factory
+	var s3Factory s3factory.Factory
+
+	// 1. GCS Factory の初期化 (GCS Client)
+	gcsFactory, gcsErr := gcsfactory.NewGCSClientFactory(initCtx)
+	if gcsErr == nil {
+		// コンテキストに GCS Factory を格納
+		newCtx = context.WithValue(newCtx, gcsFactoryKey{}, gcsFactory)
+		// Close() のために GCS Factory を格納 (io.Closerを実装しているため)
+		newCtx = context.WithValue(newCtx, gcsFactoryCloserKey{}, io.Closer(gcsFactory))
+
+		if clibase.Flags.Verbose {
+			slog.Info("GCS Factoryを初期化しました。", slog.String("client_type", "GCS"))
+		}
+	} else if clibase.Flags.Verbose {
+		slog.Warn("GCS Factoryの初期化をスキップしました。", slog.String("error", gcsErr.Error()))
 	}
 
-	if clibase.Flags.Verbose {
-		slog.Info("Factory（GCSクライアント含む）を初期化し、コンテキストに格納しました。")
+	// 2. S3 Factory の初期化 (S3 Client)
+	s3Factory, s3Err := s3factory.NewS3ClientFactory(initCtx)
+	if s3Err == nil {
+		// コンテキストに S3 Factory を格納
+		newCtx = context.WithValue(newCtx, s3FactoryKey{}, s3Factory)
+		if clibase.Flags.Verbose {
+			slog.Info("S3 Factoryを初期化しました。", slog.String("client_type", "S3"))
+		}
+	} else if clibase.Flags.Verbose {
+		slog.Warn("S3 Factoryの初期化をスキップしました。", slog.String("error", s3Err.Error()))
 	}
 
-	// コマンドのコンテキストに Factory を格納
-	newCtx := context.WithValue(ctx, FactoryKey{}, clientFactory)
+	// どちらのファクトリも初期化に失敗した場合はエラーを返す
+	if gcsErr != nil && s3Err != nil {
+		return fmt.Errorf("GCSファクトリとS3ファクトリの両方の初期化に失敗しました: GCS: %v, S3: %v", gcsErr, s3Err)
+	}
+
+	// 3. Context の更新とクリーンアップ用のインスタンス保持
 	cmd.SetContext(newCtx)
 
-	return clientFactory, nil
+	return nil
 }
 
-// --- エントリポイント ---
+// =================================================================
+// 4. エントリポイント
+// =================================================================
 
 // Execute は、rootCmd を実行するメイン関数です。
 func Execute() {
-	// 実行時にFactoryを保持するための変数。Close()のために必要。
-	var factoryInstance factory.Factory
-
-	// 1. 永続フラグの追加と共通フラグの登録
+	// 1. 永続フラグの追加
 	addAppPersistentFlags(rootCmd)
 
-	// 2. PersistentPreRunE の設定
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		f, err := initAppPreRunE(cmd, args)
-		if err != nil {
-			return err
-		}
-		factoryInstance = f // Factory インスタンスを外部変数に格納
-		return nil
-	}
+	// 2. PersistentPreRunE の設定 (両方のファクトリをコンテキストに注入)
+	rootCmd.PersistentPreRunE = initPersistentPreRunE
 
 	// 3. サブコマンドの登録
-	rootCmd.AddCommand(rcopyCmd)
-	// rootCmd.AddCommand(remoteWriteCmd) // 必要に応じて追加
+	rootCmd.AddCommand(gcsCopyCmd)
+	rootCmd.AddCommand(s3CopyCmd)
 
 	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
 	defer func() {
-		if factoryInstance != nil {
-			if err := factoryInstance.Close(); err != nil {
-				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
+		if closer, ok := rootCmd.Context().Value(gcsFactoryCloserKey{}).(io.Closer); ok && closer != nil {
+			if err := closer.Close(); err != nil {
+				slog.Warn("GCSクライアントのクローズに失敗しました", slog.Any("error", err))
 			} else if clibase.Flags.Verbose {
 				slog.Info("GCSクライアントをクローズしました。")
 			}

@@ -10,61 +10,64 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rcopyFlags は rcopy コマンド固有のフラグを保持します。
-type rcopyFlags struct {
+// gcsCopyFlags は gcs-copy コマンド固有のフラグを保持します。
+type gcsCopyFlags struct {
 	OutputFilename string // -o, --output 出力ファイル名
 }
 
-var flags rcopyFlags // フラグ変数の名前を 'flags' に変更
+var gcsFlags gcsCopyFlags // gcs-copy コマンド専用のフラグ変数
 
-// rcopyCmd は 'rcopy' サブコマンドを定義します。
-var rcopyCmd = &cobra.Command{
-	Use:   "rcopy [source_path]", // コマンド名を rcopy に変更
-	Short: "リモート/ローカルパス間で内容を読み込み、指定された出力先へ転送します。",
-	Long: `指定されたパス (ローカルファイル、または GCS URI) から io.ReadCloser を開きます。
-読み込んだ内容は、標準出力、ローカルファイル、または GCS URIで指定されたリモートパスへ転送されます。`,
+// gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
+var gcsCopyCmd = &cobra.Command{
+	Use:   "gcs-copy [source_path]",
+	Short: "GCS/ローカルパス間で内容を読み込み、指定された GCS/ローカルパスへ転送します。",
+	Long: `GCS URI (gs://) またはローカルファイルパスを扱います。
+このコマンドは GCS専用ファクトリに依存し、S3 URIはサポートしません。`,
 	Args: cobra.ExactArgs(1), // 1つのパス引数を必須とする
-	RunE: runRcopy,           // 実行関数名を runRcopy に変更
+	RunE: runGCSCopy,
 }
 
 func init() {
-	// フラグの初期化
-	rcopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+	gcsCopyCmd.Flags().StringVarP(&gcsFlags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
-// runRcopy は rcopy コマンドの実行ロジックです。
-func runRcopy(cmd *cobra.Command, args []string) error {
+// runGCSCopy は gcs-copy コマンドの実行ロジックです。
+func runGCSCopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
+	outputPath := gcsFlags.OutputFilename
 
-	// 1. ClientFactory の取得 (DI)
-	clientFactory, err := GetFactoryFromContext(ctx)
+	// 1. S3 URIチェック
+	if remoteio.IsS3URI(inputPath) || (outputPath != "" && remoteio.IsS3URI(outputPath)) { // S3 URIはサポートしない
+		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
+	}
+
+	// 2. GCS専用Factoryの取得
+	gcsFactory, err := GetFactoryFromContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 2. InputReader の取得 (入力依存性の注入)
-	inputReader, err := clientFactory.NewInputReader()
+	// 3. InputReader の取得
+	inputReader, err := gcsFactory.NewInputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
 
-	// 3. 読み込みストリームのオープン
+	// 4. 読み込みストリームのオープン
 	rc, err := inputReader.Open(ctx, inputPath)
 	if err != nil {
 		return fmt.Errorf("入力ストリームのオープンに失敗しました (%s): %w", inputPath, err)
 	}
 	defer rc.Close() // 読み込みストリームは必ずクローズする
 
-	// 4. 出力先の決定とデータの転送
-	if flags.OutputFilename != "" {
-		outputPath := flags.OutputFilename
-
+	// 5. 出力先の決定とデータの転送
+	if outputPath != "" {
 		if remoteio.IsGCSURI(outputPath) {
 			// GCS URIが指定された場合
-			writer, err := clientFactory.NewOutputWriter()
+			writer, err := gcsFactory.NewOutputWriter()
 			if err != nil {
-				return fmt.Errorf("GCSOutputWriterの作成に失敗しました: %w", err)
+				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
 			// writerがGCSOutputWriterインターフェースを満たすかチェック
@@ -93,9 +96,9 @@ func runRcopy(cmd *cobra.Command, args []string) error {
 
 		} else {
 			// ローカルファイルが指定された場合
-			writer, err := clientFactory.NewOutputWriter()
+			writer, err := gcsFactory.NewOutputWriter()
 			if err != nil {
-				return fmt.Errorf("LocalOutputWriterの作成に失敗しました: %w", err)
+				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
 			// writerがLocalOutputWriterインターフェースを満たすかチェック

@@ -143,23 +143,40 @@ import (
 
 func main() {
     ctx := context.Background()
-    
-    // GCS Signerの取得
-    gcsFactory, _ := gcsfactory.NewClientFactory(ctx)
-    gcsSigner, _ := gcsFactory.NewGCSURLSigner()
-    
-    // S3 Signerの取得
-    s3Factory, _ := s3factory.NewS3ClientFactory(ctx)
-    s3Signer, _ := s3Factory.NewS3URLSigner()
-    
     expires := 15 * time.Minute
     
+    // GCS Signerの取得 (GCS専用ファクトリを使用)
+    gcsFactory, err := gcsfactory.NewGCSClientFactory(ctx)
+    if err != nil {
+        log.Fatalf("GCS Factory初期化失敗: %v", err)
+    }
+    gcsSigner, err := gcsFactory.NewGCSURLSigner()
+    if err != nil {
+        log.Fatalf("GCS URLSigner生成失敗: %v", err)
+    }
+
+    // S3 Signerの取得 (S3専用ファクトリを使用)
+    s3Factory, err := s3factory.NewS3ClientFactory(ctx)
+    if err != nil {
+        log.Fatalf("S3 Factory初期化失敗: %v", err)
+    }
+    s3Signer, err := s3Factory.NewS3URLSigner()
+    if err != nil {
+        log.Fatalf("S3 URLSigner生成失敗: %v", err)
+    }
+
     // GCS 署名付きURLを生成
-    gcsSignedURL, _ := gcsSigner.GenerateSignedURL(ctx, "gs://my-bucket/report.pdf", "GET", expires)
+    gcsSignedURL, err := gcsSigner.GenerateSignedURL(ctx, "gs://my-bucket/report.pdf", "GET", expires)
+    if err != nil {
+        log.Fatalf("GCS署名付きURL生成失敗: %v", err)
+    }
     log.Printf("✅ GCS Signed URL: %s", gcsSignedURL)
     
     // S3 署名付きURLを生成
-    s3SignedURL, _ := s3Signer.GenerateSignedURL(ctx, "s3://my-bucket/data.csv", "PUT", expires)
+    s3SignedURL, err := s3Signer.GenerateSignedURL(ctx, "s3://my-bucket/data.csv", "PUT", expires)
+    if err != nil {
+        log.Fatalf("S3署名付きURL生成失敗: %v", err)
+    }
     log.Printf("✅ S3 Signed URL: %s", s3SignedURL)
 }
 ```

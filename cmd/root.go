@@ -30,13 +30,6 @@ type FactoryKey struct{}
 // S3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
 type S3FactoryKey struct{}
 
-// rcopyFlags は gcsCopyCmd や s3CopyCmd で共有されるフラグを保持します。
-type rcopyFlags struct {
-	OutputFilename string // -o, --output 出力ファイル名
-}
-
-var flags rcopyFlags // グローバルに定義
-
 // AppFlags はこのアプリケーション固有の永続フラグを保持
 type AppFlags struct {
 	TimeoutSec int // --timeout ClientFactory初期化時のコンテキストタイムアウト（秒）
@@ -107,7 +100,7 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	var s3Factory s3factory.Factory
 
 	// 1. GCS Factory の初期化 (GCS Client)
-	gcsFactory, gcsErr := factory.NewClientFactory(initCtx)
+	gcsFactory, gcsErr := factory.NewGCSClientFactory(initCtx)
 	if gcsErr == nil {
 		// コンテキストに GCS Factory を格納
 		newCtx = context.WithValue(newCtx, FactoryKey{}, gcsFactory)

@@ -10,6 +10,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// gcsCopyFlags は gcsCopyCmd 固有のフラグを保持します。
+type gcsCopyFlags struct {
+	OutputFilename string // -o, --output 出力ファイル名
+}
+
+var gcsFlags gcsCopyFlags // gcsCopyCmd 専用のフラグ変数
+
 // gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
 var gcsCopyCmd = &cobra.Command{
 	Use:   "gcs-copy [source_path]",
@@ -21,18 +28,17 @@ var gcsCopyCmd = &cobra.Command{
 }
 
 func init() {
-	// フラグは共通のものを使用
-	gcsCopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+	gcsCopyCmd.Flags().StringVarP(&gcsFlags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
 // runGCSCopy は rcopy コマンドの実行ロジックです。
 func runGCSCopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
-	outputPath := flags.OutputFilename
+	outputPath := gcsFlags.OutputFilename
 
-	// 1. S3 URIチェック (修正案の適用: S3 URIを明示的に拒否)
-	if remoteio.IsS3URI(inputPath) || remoteio.IsS3URI(outputPath) {
+	// 1. S3 URIチェック
+	if remoteio.IsS3URI(inputPath) || (outputPath != "" && remoteio.IsS3URI(outputPath)) {
 		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
 	}
 

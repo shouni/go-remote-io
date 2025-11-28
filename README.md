@@ -208,8 +208,8 @@ go-remote-io/
 │   │   ├── writer.go       # UniversalIOWriter (Local / GCS / S3 対応)
 │   │   ├── signer.go       # GCSURLSigner & S3URLSigner の実装
 │   │   └── util.go         # URIヘルパー関数 を集約
-│   ├── factory/              # GCS専用ファクトリ (GCS環境に特化)
-│   │   └── factory.go      # ClientFactory (GCSClientのみを管理)
+│   ├── gcsfactory/              # GCS専用ファクトリ (GCS環境に特化)
+│   │   └── gcs_factory.go      # GCSClientFactory (GCSClientのみを管理)
 │   └── s3factory/            # S3専用ファクトリ (AWS環境に特化)
 │       └── s3_factory.go    # S3ClientFactory (S3Clientのみを管理)
 └── cmd/ 

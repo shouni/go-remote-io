@@ -22,7 +22,7 @@ var gcsCopyCmd = &cobra.Command{
 
 func init() {
 	// フラグの初期化
-	rcopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+	gcsCopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
 // runGCSCopy は rcopy コマンドの実行ロジックです。

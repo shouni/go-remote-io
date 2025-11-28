@@ -30,17 +30,13 @@ type FactoryKey struct{}
 // S3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
 type S3FactoryKey struct{}
 
-// ClientFactoryInstance は Close() のために GCS/S3 クライアントインスタンスを一時的に保持するインターフェース
-type ClientFactoryInstance interface {
-	io.Closer
-}
-
 // rcopyFlags は gcsCopyCmd や s3CopyCmd で共有されるフラグを保持します。
 type rcopyFlags struct {
 	OutputFilename string // -o, --output 出力ファイル名
+	ContentType    string
 }
 
-var flags rcopyFlags // ★問題点15の修正: flags変数をグローバルに定義
+var flags rcopyFlags // グローバルに定義
 
 // AppFlags はこのアプリケーション固有の永続フラグを保持
 type AppFlags struct {
@@ -48,6 +44,9 @@ type AppFlags struct {
 }
 
 var appFlags AppFlags
+
+// factoryInstanceKey は GCS Factoryを Close() するために保持するキー
+type factoryInstanceKey struct{}
 
 // =================================================================
 // 2. Factoryの取得ヘルパー関数
@@ -104,10 +103,18 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(appFlags.TimeoutSec)*time.Second)
 	defer cancel()
 
+	newCtx := ctx
+	var gcsFactory factory.Factory
+	var s3Factory s3factory.Factory
+
 	// 1. GCS Factory の初期化 (GCS Client)
 	gcsFactory, gcsErr := factory.NewClientFactory(initCtx)
 	if gcsErr == nil {
-		ctx = context.WithValue(ctx, FactoryKey{}, gcsFactory)
+		// コンテキストに GCS Factory を格納
+		newCtx = context.WithValue(newCtx, FactoryKey{}, gcsFactory)
+		// Close() のために GCS Factory を格納 (io.Closerを実装しているため)
+		newCtx = context.WithValue(newCtx, factoryInstanceKey{}, io.Closer(gcsFactory))
+
 		if clibase.Flags.Verbose {
 			slog.Info("GCS Factoryを初期化しました。", slog.String("client_type", "GCS"))
 		}
@@ -118,7 +125,11 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	// 2. S3 Factory の初期化 (S3 Client)
 	s3Factory, s3Err := s3factory.NewS3ClientFactory(initCtx)
 	if s3Err == nil {
-		ctx = context.WithValue(ctx, S3FactoryKey{}, s3Factory)
+		// コンテキストに S3 Factory を格納
+		newCtx = context.WithValue(newCtx, S3FactoryKey{}, s3Factory)
+
+		// S3Factoryはio.Closerを実装していないため、クリーンアップのための保持は不要（修正案2を適用）
+
 		if clibase.Flags.Verbose {
 			slog.Info("S3 Factoryを初期化しました。", slog.String("client_type", "S3"))
 		}
@@ -132,20 +143,11 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	// 3. Context の更新とクリーンアップ用のインスタンス保持
-	cmd.SetContext(ctx)
-
-	// Close()のためにインスタンスを保持 (ここでは両方のクローズ処理を担うラッパーとして機能)
-	cmd.SetContext(context.WithValue(ctx, factoryInstanceKey{}, struct{ io.Closer }{io.Closer(gcsFactory)}))
-	cmd.SetContext(context.WithValue(ctx, s3FactoryInstanceKey{}, io.Closer(s3Factory)))
+	// 複数回の SetContext() を回避するため、最後に一度だけ newCtx を設定（問題点1を修正）
+	cmd.SetContext(newCtx)
 
 	return nil
 }
-
-// factoryInstanceKey は GCS Factoryを Close() するために保持するキー
-type factoryInstanceKey struct{}
-
-// s3FactoryInstanceKey は S3 Factoryを Close() するために保持するキー
-type s3FactoryInstanceKey struct{}
 
 // =================================================================
 // 4. エントリポイント
@@ -165,21 +167,12 @@ func Execute() {
 
 	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
 	defer func() {
-		// GCS Factoryのクローズ処理
+		// GCS Factoryのクローズ処理 (S3のクローズ処理は削除済み)
 		if closer, ok := rootCmd.Context().Value(factoryInstanceKey{}).(io.Closer); ok && closer != nil {
 			if err := closer.Close(); err != nil {
 				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
 			} else if clibase.Flags.Verbose {
 				slog.Info("GCSクライアントをクローズしました。")
-			}
-		}
-
-		// S3 Factoryのクローズ処理 (S3 FactoryはClose()を持たないが、インターフェースを介して安全に呼び出す)
-		if closer, ok := rootCmd.Context().Value(s3FactoryInstanceKey{}).(io.Closer); ok && closer != nil {
-			if err := closer.Close(); err != nil {
-				slog.Info("警告: S3クライアントのクローズに失敗しました: %v", err)
-			} else if clibase.Flags.Verbose {
-				slog.Info("S3クライアントをクローズしました。")
 			}
 		}
 	}()

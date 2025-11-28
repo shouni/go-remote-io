@@ -5,22 +5,24 @@
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/go-remote-io)](https://github.com/shouni/go-remote-io/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Go Remote IO は、**Google Cloud Storage (GCS) オブジェクト**と**ローカルファイルシステム**への I/O 操作を統一的に扱うための Go 言語製ライブラリです。
+Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**ローカルファイルシステム**への I/O 操作を統一的に扱うための Go 言語製ライブラリです。
 
-このライブラリは、アプリケーションの I/O 依存性を抽象化し、ビジネスロジックから GCS とローカルファイルの判別ロジックを分離します。
+このライブラリは、アプリケーションの I/O 依存性を抽象化し、ビジネスロジックからクラウドサービスやローカルファイルの判別ロジックを分離します。
 
 -----
 
 ## ✨ 主要な機能と特徴
 
-* **リソース管理とDI (`package factory` が担当)**: `factory.Factory` インターフェースを提供し、**`cloud.google.com/go/storage.Client`** の初期化、リソースライフサイクル管理（`Close()`）、およびI/Oコンポーネントの生成を統一的に行います。
-* **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://bucket/object`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **統一された出力インターフェース**: `remoteio.OutputWriter` インターフェースを提供します。このインターフェースは**汎用的な `Write(ctx, uri, reader, contentType)` メソッド**を核とします。URIに `gs://` が含まれていれば GCS へ、そうでなければローカルファイルへ、ライブラリ内部で**透過的に**書き込みを処理します。**呼び出し元（利用側）でのURI判別や型アサートは一切不要**です。
-* **期限付きURLの生成**: `remoteio.URLSigner` インターフェースを提供します。これにより、GCS URIに対して**期限付きの署名付きURL (Signed URL)** を生成できます。これは、アプリケーションが認証なしで一時的にコンテンツを公開したい場合に非常に有用です。
-* **GCSストリーム書き込み**: `GCSOutputWriter` の機能（現在は `OutputWriter` に統合）を利用し、`io.Reader` を受け取り、コンテンツを直接 GCS バケットへ**ストリーミング書き込み**します。**MIMEタイプを動的に指定**可能です。
-* **関心事の分離**: 外部サービスアクセス (`storage.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
+* **ユニバーサル I/O**: URIのプレフィックスに応じて、**GCS (`gs://`)**、**Amazon S3 (`s3://`)**、または**ローカルファイルパス**へのI/O処理を**透過的に**切り替えます。
+* **リソース管理とDI (`package factory` / `package s3factory` が担当)**:
+    * **`factory`パッケージ**: **GCSクライアント**のみを初期化・管理し、GCP環境に特化します。
+    * **`s3factory`パッケージ (新規)**: **S3クライアント**のみを初期化・管理し、AWS環境に特化することで、**認証情報の依存関係を完全に分離**します。
+* **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://`, `s3://`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
+* **統一された出力インターフェース**: `remoteio.OutputWriter` インターフェースを提供します。このインターフェースは**汎用的な `Write(ctx, uri, reader, contentType)` メソッド**を核とし、GCS/S3/ローカルへの書き込みを**透過的に**処理します。
+* **期限付きURLの生成**: `remoteio.URLSigner` インターフェースを提供します。GCS および S3 URIに対して**期限付きの署名付きURL (Signed URL)** を生成できます。
+* **関心事の分離**: 外部サービスアクセス (`storage.Client`, `s3.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
 
----
+-----
 
 ## 🛠️ インストールと利用
 
@@ -34,7 +36,9 @@ go get github.com/shouni/go-remote-io
 
 ### 2\. 利用方法（InputReader の例）
 
-`factory.Factory` を初期化し、そこから **`NewInputReader()`** メソッドを使ってコンポーネントを取得します。
+使用するクラウド環境に合わせて、適切なファクトリを初期化します。
+
+#### A. GCS環境での利用 (`factory`パッケージを使用)
 
 ```go
 package main
@@ -51,16 +55,12 @@ import (
 func main() {
     ctx := context.Background()
 
-    // 1. Factoryの初期化
+    // 1. GCS専用Factoryの初期化
     clientFactory, err := factory.NewClientFactory(ctx)
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer func() {
-        if closeErr := clientFactory.Close(); closeErr != nil {
-            log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
-        }
-    }()
+    defer clientFactory.Close()
     
     // 2. InputReader の実装を取得
     reader, err := clientFactory.NewInputReader()
@@ -68,7 +68,7 @@ func main() {
         log.Fatalf("InputReader生成失敗: %v", err)
     }
     
-    // 3. ローカルファイル、または GCS URI のどちらでも利用可能
+    // 3. ローカルファイル、または GCS URI で利用可能
     paths := []string{"./local_file.txt", "gs://my-bucket/remote_data.csv"}
 
     for _, path := range paths {
@@ -77,73 +77,51 @@ func main() {
             log.Printf("読み込み失敗 (%s): %v", path, err)
             continue
         }
-        defer rc.Close()
-        
-        content, _ := io.ReadAll(rc)
-        fmt.Printf("--- 読み込み元: %s ---\n%s\n", path, string(content))
+        // ... (読み込みロジック)
+        rc.Close()
     }
 }
 ```
 
-### 3\. 利用方法（OutputWriter の例: 統一された書き込み）
+#### B. S3環境での利用 (`s3factory`パッケージを使用)
 
-URIが**GCS でもローカルでも、同じ** `writer.Write()` メソッドで処理できます。**ビジネスロジックは書き込み先の詳細を知る必要がありません。**
+S3専用のファクトリを使用することで、GCP関連の認証情報やSDKへの依存性を排除できます。
 
 ```go
 package main
 
 import (
-    "bytes"
     "context"
     "log"
-    
-    "github.com/shouni/go-remote-io/pkg/factory"
+    "github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {
     ctx := context.Background()
-
-    // 1. Factoryの初期化とクローズ
-    clientFactory, err := factory.NewClientFactory(ctx)
+    
+    // 1. S3専用Factoryの初期化 (AWS Configのみをロード)
+    s3Factory, err := s3factory.NewS3ClientFactory(ctx)
     if err != nil {
-        log.Fatalf("Factory初期化失敗: %v", err)
-    }
-    defer clientFactory.Close()
-    
-    // 2. OutputWriter の実装を取得
-    writer, err := clientFactory.NewOutputWriter()
-    if err != nil {
-        log.Fatalf("OutputWriter生成失敗: %v", err)
+        log.Fatalf("S3 Factory初期化失敗: %v", err)
     }
     
-    // 3. 汎用 Write メソッドで GCS と ローカルに書き込む
-    content := "これは統一されたI/Oで書き込まれるテストコンテンツです。"
+    // 2. OutputWriter を取得
+    writer, _ := s3Factory.NewOutputWriter()
     
-    // --- GCSへの書き込み ---
-    gcsURI := "gs://my-output-bucket/output/result.txt"
-    readerGCS := bytes.NewReader([]byte(content))
-    contentType := "text/plain; charset=utf-8" // GCSに必要なMIMEタイプを指定
+    // 3. S3とローカルファイルに書き込む
+    s3URI := "s3://my-aws-bucket/output/result.txt"
+    content := "S3専用環境からの書き込みです"
     
-    if err := writer.Write(ctx, gcsURI, readerGCS, contentType); err != nil {
-        log.Fatalf("GCSへの書き込みに失敗しました: %v", err)
+    if err := writer.Write(ctx, s3URI, strings.NewReader(content), "text/plain"); err != nil {
+        log.Fatalf("S3への書き込みに失敗しました: %v", err)
     }
-    log.Printf("✅ GCSへの書き込みが完了しました: %s", gcsURI)
-
-    // --- ローカルファイルへの書き込み ---
-    localPath := "./output/local_result.txt"
-    readerLocal := bytes.NewReader([]byte(content))
-    
-    // ローカルファイルの場合、ContentTypeは無視されます
-    if err := writer.Write(ctx, localPath, readerLocal, ""); err != nil {
-        log.Fatalf("ローカルへの書き込みに失敗しました: %v", err)
-    }
-    log.Printf("✅ ローカルへの書き込みが完了しました: %s", localPath)
+    log.Printf("✅ S3への書き込みが完了しました: %s", s3URI)
 }
 ```
 
-### 4\. 利用方法（URLSigner の例: 期限付きURLの生成）
+### 3\. 利用方法（URLSigner の例: 期限付きURLの生成）
 
-`factory.Factory` から **`NewURLSigner()`** メソッドを使って署名付きURL生成コンポーネントを取得します。
+GCSとS3のSignerは、それぞれのファクトリから取得します。
 
 ```go
 package main
@@ -152,34 +130,30 @@ import (
     "context"
     "log"
     "time"
-
-	"github.com/shouni/go-remote-io/pkg/factory"
+    "github.com/shouni/go-remote-io/pkg/factory"
+    "github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {
     ctx := context.Background()
     
-    // 1. Factoryの初期化
-    clientFactory, _ := factory.NewClientFactory(ctx)
-    defer clientFactory.Close()
+    // GCS Signerの取得
+    gcsFactory, _ := factory.NewClientFactory(ctx)
+    gcsSigner, _ := gcsFactory.NewGCSURLSigner() // NewURLSignerからNewGCSURLSignerに変更
     
-    // 2. URLSigner の実装を取得 (GCSクライアントに依存)
-    signer, err := clientFactory.NewURLSigner()
-    if err != nil {
-        log.Fatalf("URLSigner生成失敗: %v", err)
-    }
+    // S3 Signerの取得
+    s3Factory, _ := s3factory.NewS3ClientFactory(ctx)
+    s3Signer, _ := s3Factory.NewS3URLSigner()
     
-    // 3. 署名付きURLを生成
-    gcsURI := "gs://my-bucket/public_report.pdf"
     expires := 15 * time.Minute
     
-    // 注意: 生成にはサービスアカウントの認証が必要です
-    signedURL, err := signer.GenerateSignedURL(ctx, gcsURI, "GET", expires)
-    if err != nil {
-        log.Fatalf("署名付きURL生成失敗: %v", err)
-    }
-
-    log.Printf("✅ 署名付きURL (15分間有効) : %s", signedURL)
+    // GCS 署名付きURLを生成
+    gcsSignedURL, _ := gcsSigner.GenerateSignedURL(ctx, "gs://my-bucket/report.pdf", "GET", expires)
+    log.Printf("✅ GCS Signed URL: %s", gcsSignedURL)
+    
+    // S3 署名付きURLを生成
+    s3SignedURL, _ := s3Signer.GenerateSignedURL(ctx, "s3://my-bucket/data.csv", "PUT", expires)
+    log.Printf("✅ S3 Signed URL: %s", s3SignedURL)
 }
 ```
 
@@ -187,66 +161,45 @@ func main() {
 
 ## 💻 CLI実行方法とデータ転送の例
 
-**`rcopy`** サブコマンドは、入力元と出力先がローカルファイル、または GCS URI のいずれであっても、透過的なデータ転送を可能にします。
+**`rcopy`** サブコマンドは、入力元と出力先がローカルファイル、GCS URI、または S3 URI のいずれであっても、透過的なデータ転送を可能にします。
 
-### 1\. 標準出力への転送 (GCS → Stdout)
+### 1\. S3オブジェクトへの転送 (Local → S3)
 
-入力元のデータをそのまま標準出力に出力します。
+ローカルファイルを読み込み、S3バケットへストリーミングで書き出します。
 
 ```bash
-# コマンド例: GCSのファイルを標準出力に出力
-$ go run ./ rcopy gs://input-bucket/data.txt
+# コマンド例: ローカルファイルをS3に転送
+$ go run ./ rcopy ./local/report.json -o s3://dest-bucket/archive/report.json
 ```
 
-### 2\. ローカルファイルへの転送 (Local → Local)
+### 2\. GCSからS3への転送 (GCS → S3)
 
-ローカルファイルを読み込み、別のローカルファイルに書き出します。
-
-```bash
-# コマンド例: ローカルファイルをローカルファイルに転送
-$ go run ./ rcopy ./local/data.csv -o ./output/result.csv
-```
-
-### 3\. GCSオブジェクトへの転送 (Local → GCS)
-
-ローカルファイルを読み込み、GCSバケットへストリーミングで書き出します。
+GCSオブジェクトから読み込み、S3オブジェクトへ直接内容をストリーミング転送します。
 
 ```bash
-# コマンド例: ローカルファイルをGCSに転送
-$ go run ./ rcopy ./local/report.json -o gs://dest-bucket/archive/report.json
-```
-
-### 4\. GCSからGCSへの転送 (GCS → GCS)
-
-GCSオブジェクトから読み込み、別のGCSオブジェクトへ直接内容をストリーミング転送します。これは、**サーバーサイドでのパイプライン処理**に非常に有用です。
-
-```bash
-# コマンド例: GCSオブジェクト間での転送
-$ go run ./ rcopy gs://source-bucket/file.dat -o gs://dest-bucket/archive/file.dat
-
-# 実行ログの例
-2025/11/16 03:39:25 INFO データ転送開始 input=gs://source-bucket/file.dat output=gs://dest-bucket/archive/file.dat type=GCS
+# コマンド例: GCSからS3への転送
+$ go run ./ rcopy gs://source-bucket/file.dat -o s3://dest-bucket/archive/file.dat
 ```
 
 -----
 
 ## 📐 ライブラリ構成
 
-CLIアプリケーションのエントリポイントを含む、再利用可能なパッケージ構成です。
 
 ```
 go-remote-io/
 ├── pkg/
-│   ├── remoteio/
-│   │   ├── reader.go   # InputReader インターフェースと LocalGCSInputReader の実装
-│   │   ├── writer.go   # OutputWriter (GCS/Local) インターフェースと具象実装
-│   │   ├── signer.go   # URLSigner インターフェースと GCS 署名付きURL生成の実装
-│   │   └── uri.go      # GCS URI判定・パースユーティリティ (IsGCSURI, ParseGCSURI)
-│   └── factory/
-│       └── factory.go   # Factory インターフェースと ClientFactory によるDIとリソース管理
+│   ├── remoteio/             # I/Oの核となる機能 (クライアントに依存せず、インターフェースを実装)
+│   │   ├── reader.go       # UniversalInputReader (Local / GCS / S3 対応)
+│   │   ├── writer.go       # UniversalIOWriter (Local / GCS / S3 対応)
+│   │   ├── signer.go       # GCSURLSigner & S3URLSigner の実装
+│   │   └── util.go         # URIヘルパー関数 (IsGCSURI, ParseS3URI など) を集約
+│   ├── factory/              # GCS専用ファクトリ (GCS環境に特化)
+│   │   └── factory.go      # ClientFactory (GCSClientのみを管理)
+│   └── s3factory/            # S3専用ファクトリ (AWS環境に特化)
+│       └── s3_factory.go    # S3ClientFactory (S3Clientのみを管理)
 └── cmd/ 
-    └── rcopy.go         # CLIアプリケーション (rcopy) のエントリポイント
-    └── root.go          # CLIアプリケーションのルートコマンド定義
+    └── rcopy.go         
 ```
 
 ### 外部依存パッケージ
@@ -254,7 +207,7 @@ go-remote-io/
 本ライブラリは、以下の主要な外部パッケージに依存しています。
 
 * **GCSコア依存**: `cloud.google.com/go/storage` (Google Cloud Storage へのアクセス)
-* **CLI依存**: `github.com/spf13/cobra` および `github.com/shouni/go-cli-base` (`cmd/` パッケージで使用)
+* **AWSコア依存**: `github.com/aws/aws-sdk-go-v2/...` (Amazon S3 へのアクセスと認証)
 
 -----
 

@@ -2,6 +2,7 @@ package remoteio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 // =================================================================
@@ -85,6 +87,9 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 	// GCS オブジェクトリーダーを作成
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
+		if err == storage.ErrObjectNotExist {
+			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, err)
+		}
 		return nil, fmt.Errorf("GCSファイルの読み込みに失敗しました (URI: %s): %w", gcsURI, err)
 	}
 	return rc, nil
@@ -117,7 +122,12 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	})
 
 	if err != nil {
-		// ログコメントを日本語に修正
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &noSuchKey) {
+			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, err)
+		}
+
+		// それ以外の一般的なS3エラー
 		return nil, fmt.Errorf("S3ファイルの読み込みに失敗しました (URI: %s): %w", s3URI, err)
 	}
 	return result.Body, nil

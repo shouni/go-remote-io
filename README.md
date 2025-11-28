@@ -38,7 +38,7 @@ go get github.com/shouni/go-remote-io
 
 使用するクラウド環境に合わせて、適切なファクトリを初期化します。
 
-#### A. GCS環境での利用 (`factory`パッケージを使用)
+#### A. GCS環境での利用 (`gcsfactory`パッケージを使用)
 
 ```go
 package main
@@ -49,25 +49,25 @@ import (
     "io"
     "log"
 
-    "https://github.com/shouni/go-remote-io/pkg/factory" 
+    "github.com/shouni/go-remote-io/pkg/gcsfactory" 
 )
 
 func main() {
     ctx := context.Background()
 
     // 1. GCS専用Factoryの初期化とクローズ
-    clientFactory, err := factory.NewClientFactory(ctx)
+	gcsFactory, err := gcsfactory.NewGCSClientFactory(ctx)
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
     defer func() {
-        if closeErr := clientFactory.Close(); closeErr != nil {
+        if closeErr := gcsFactory.Close(); closeErr != nil {
             log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
         }
     }()
     
     // 2. InputReader の実装を取得
-    reader, err := clientFactory.NewInputReader()
+    reader, err := gcsFactory.NewInputReader()
     if err != nil {
         log.Fatalf("InputReader生成失敗: %v", err)
     }
@@ -100,7 +100,7 @@ import (
     "context"
     "log"
     "strings"
-    "https://github.com/shouni/go-remote-io/pkg/s3factory"
+    "github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {
@@ -137,15 +137,15 @@ import (
     "context"
     "log"
     "time"
-    "https://github.com/shouni/go-remote-io/pkg/factory"
-    "https://github.com/shouni/go-remote-io/pkg/s3factory"
+    "github.com/shouni/go-remote-io/pkg/gcsfactory"
+    "github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {
     ctx := context.Background()
     
     // GCS Signerの取得
-    gcsFactory, _ := factory.NewClientFactory(ctx)
+    gcsFactory, _ := gcsfactory.NewClientFactory(ctx)
     gcsSigner, _ := gcsFactory.NewGCSURLSigner()
     
     // S3 Signerの取得

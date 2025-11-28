@@ -11,7 +11,7 @@ import (
 	clibase "github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
 
-	"github.com/shouni/go-remote-io/pkg/factory"
+	"github.com/shouni/go-remote-io/pkg/gcsfactory"
 	"github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
@@ -24,8 +24,8 @@ const (
 // 1. グローバル変数とコンテキストキーの定義
 // =================================================================
 
-// FactoryKey は context.Context に factory.Factory (GCS専用) を格納・取得するための非公開キー
-type FactoryKey struct{}
+// gcsFactoryKey は context.Context に gcsfactory.Factory (GCS専用) を格納・取得するための非公開キー
+type gcsFactoryKey struct{}
 
 // S3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
 type S3FactoryKey struct{}
@@ -44,13 +44,13 @@ type factoryInstanceKey struct{}
 // 2. Factoryの取得ヘルパー関数
 // =================================================================
 
-// GetFactoryFromContext は、cmd.Context() から factory.Factory (GCS専用) を取り出します。
-func GetFactoryFromContext(ctx context.Context) (factory.Factory, error) {
-	val := ctx.Value(FactoryKey{})
+// GetFactoryFromContext は、cmd.Context() から gcsfactory.Factory (GCS専用) を取り出します。
+func GetFactoryFromContext(ctx context.Context) (gcsfactory.Factory, error) {
+	val := ctx.Value(gcsFactoryKey{})
 	if val == nil {
 		return nil, fmt.Errorf("コンテキストにGCSファクトリが見つかりません。")
 	}
-	f, ok := val.(factory.Factory)
+	f, ok := val.(gcsfactory.Factory)
 	if !ok {
 		return nil, fmt.Errorf("コンテキストの値が期待される型 (factory.Factory) ではありません。")
 	}
@@ -96,14 +96,14 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	newCtx := ctx
-	var gcsFactory factory.Factory
+	var gcsFactory gcsfactory.Factory
 	var s3Factory s3factory.Factory
 
 	// 1. GCS Factory の初期化 (GCS Client)
-	gcsFactory, gcsErr := factory.NewGCSClientFactory(initCtx)
+	gcsFactory, gcsErr := gcsfactory.NewGCSClientFactory(initCtx)
 	if gcsErr == nil {
 		// コンテキストに GCS Factory を格納
-		newCtx = context.WithValue(newCtx, FactoryKey{}, gcsFactory)
+		newCtx = context.WithValue(newCtx, gcsFactoryKey{}, gcsFactory)
 		// Close() のために GCS Factory を格納 (io.Closerを実装しているため)
 		newCtx = context.WithValue(newCtx, factoryInstanceKey{}, io.Closer(gcsFactory))
 

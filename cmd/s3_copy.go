@@ -79,7 +79,6 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("このコマンドはGCS URI (gs://) をサポートしていません。gcs-copy コマンドを使用してください。")
 	}
 
-	// --- S3 / ローカルファイルに出力する場合 ---
 	writer, err := s3Factory.NewOutputWriter()
 	if err != nil {
 		return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
@@ -89,30 +88,14 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 	contentType := s3Flags.ContentType
 	if contentType == "" && remoteio.IsS3URI(outputPath) {
 		// S3 URIへの書き込みでContent-Typeが指定されていない場合、デフォルトを適用
-		// remoteio.DefaultContentType は remoteio/writer.go で定義されている
 		contentType = remoteio.DefaultContentType
 		slog.Debug("Content-Typeが未指定のため、デフォルト値を適用", slog.String("content_type", contentType))
 	}
 
-	if remoteio.IsS3URI(outputPath) {
-		// S3 URIが指定された場合
-		s3Writer, ok := writer.(remoteio.S3OutputWriter)
-		if !ok {
-			return fmt.Errorf("FactoryがS3出力用のWriterインターフェース(remoteio.S3OutputWriter)を提供していません")
-		}
-		bucket, object, _ := remoteio.ParseS3URI(outputPath)
-		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "S3"))
-
-		// ContentTypeを渡す
-		if err := s3Writer.WriteToS3(ctx, bucket, object, rc, contentType); err != nil {
-			return fmt.Errorf("S3へのコンテンツ書き込みに失敗しました: %w", err)
-		}
-
-	} else {
-		// ローカルファイルに出力する場合
-		if err := writer.WriteToLocal(ctx, outputPath, rc); err != nil {
-			return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
-		}
+	// OutputWriter の実装が S3 URIの場合は S3へ、その他はローカルに書き込みます。
+	slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath))
+	if err := writer.Write(ctx, outputPath, rc, contentType); err != nil {
+		return fmt.Errorf("'%s' への書き込みに失敗しました: %w", outputPath, err)
 	}
 
 	return nil

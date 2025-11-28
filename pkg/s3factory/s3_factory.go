@@ -3,7 +3,6 @@ package s3factory
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -11,8 +10,7 @@ import (
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
-// Factory インターフェースの定義
-// S3専用に特化し、GCS関連のメソッドは含みません。
+// Factory インターフェースの定義 (変更なし)
 type Factory interface {
 	GetS3Client() (*s3.Client, error)
 	NewS3URLSigner() (remoteio.URLSigner, error)
@@ -25,32 +23,22 @@ type Factory interface {
 type S3ClientFactory struct {
 	s3Client  *s3.Client
 	awsConfig aws.Config
-	once      sync.Once // クライアントの初期化を一回だけ行うためのロック
 }
 
 // NewS3ClientFactory は新しい S3ClientFactory インスタンスを作成します。
+// sync.Once を削除し、初期化ロジックを直接実行します。
 func NewS3ClientFactory(ctx context.Context) (Factory, error) {
-	f := &S3ClientFactory{}
-	var initErr error
-
-	// クライアントの初期化はここで一度だけ行われます。
-	f.once.Do(func() {
-		// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)
-		awsCfg, err := config.LoadDefaultConfig(ctx)
-		if err != nil {
-			initErr = fmt.Errorf("AWS設定のロードに失敗しました (認証情報またはリージョン設定を確認してください): %w", err)
-			return
-		}
-		f.awsConfig = awsCfg
-
-		// 2. S3 クライアントの初期化
-		f.s3Client = s3.NewFromConfig(awsCfg)
-	})
-
-	if initErr != nil {
-		return nil, initErr
+	// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)
+	awsCfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("AWS設定のロードに失敗しました (認証情報またはリージョン設定を確認してください): %w", err)
 	}
-	return f, nil
+
+	// 2. S3 クライアントの初期化とファクトリの生成
+	return &S3ClientFactory{
+		s3Client:  s3.NewFromConfig(awsCfg),
+		awsConfig: awsCfg,
+	}, nil
 }
 
 // GetS3Client は、ファクトリが保持するS3クライアントを返します。
@@ -80,8 +68,6 @@ func (f *S3ClientFactory) NewInputReader() (remoteio.InputReader, error) {
 	}
 
 	// remoteio.NewUniversalInputReader を使用 (GCSクライアントはnil)
-	// InputReaderはローカルファイルもサポートするため、S3がnilでない限りローカル/S3の機能を提供可能。
-	// ただし、このファクトリはS3専用のため、GCSクライアントはnilを渡すのが設計意図通り。
 	return remoteio.NewUniversalInputReader(nil, s3Client), nil
 }
 

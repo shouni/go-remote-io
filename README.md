@@ -14,9 +14,9 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**�
 ## ✨ 主要な機能と特徴
 
 * **ユニバーサル I/O**: URIのプレフィックスに応じて、**GCS (`gs://`)**、**Amazon S3 (`s3://`)**、または**ローカルファイルパス**へのI/O処理を**透過的に**切り替えます。
-* **リソース管理とDI (`package factory` / `package s3factory` が担当)**:
-    * **`factory`パッケージ**: **GCSクライアント**のみを初期化・管理し、GCP環境に特化します。
-    * **`s3factory`パッケージ (新規)**: **S3クライアント**のみを初期化・管理し、AWS環境に特化することで、**認証情報の依存関係を完全に分離**します。
+* **リソース管理とDI (`package gcsfactory` / `package s3factory` が担当)**:
+    * **`gcsfactory`パッケージ**: **GCSクライアント**のみを初期化・管理し、GCP環境に特化します。
+    * **`s3factory`パッケージ**: **S3クライアント**のみを初期化・管理し、AWS環境に特化することで、**認証情報の依存関係を完全に分離**します。
 * **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://`, `s3://`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
 * **統一された出力インターフェース**: `remoteio.OutputWriter` インターフェースを提供します。このインターフェースは**汎用的な `Write(ctx, uri, reader, contentType)` メソッド**を核とし、GCS/S3/ローカルへの書き込みを**透過的に**処理します。
 * **期限付きURLの生成**: `remoteio.URLSigner` インターフェースを提供します。GCS および S3 URIに対して**期限付きの署名付きURL (Signed URL)** を生成できます。

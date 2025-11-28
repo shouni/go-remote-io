@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/storage"
+	"github.com/aws/aws-sdk-go-v2/service/s3" // S3クライアントの型をインポートに追加
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
@@ -13,11 +14,11 @@ type Factory interface {
 	// GetGCSClient はファクトリが保持するGCSクライアントを返します。
 	GetGCSClient() (*storage.Client, error)
 	// NewURLSigner は GCSクライアントを注入した URLSigner を生成します。
-	NewURLSigner() (remoteio.URLSigner, error) //
+	NewURLSigner() (remoteio.URLSigner, error)
 	// NewInputReader は GCSクライアントを注入した InputReader を生成します。
 	NewInputReader() (remoteio.InputReader, error)
 	// NewOutputWriter は GCSクライアントを注入した OutputWriter を生成します。
-	// OutputWriter は GCSOutputWriter と LocalOutputWriter の両方を満たします。
+	// OutputWriter は GCSOutputWriter, S3OutputWriter, LocalOutputWriter のすべてを満たします。
 	NewOutputWriter() (remoteio.OutputWriter, error)
 	// Close は保持しているリソースを解放します。
 	Close() error
@@ -29,6 +30,8 @@ type ClientFactory struct {
 }
 
 // NewClientFactory は新しい Factory インターフェースの実装である ClientFactory インスタンスを作成します。
+// 注: このファクトリはGCSクライアントのみを初期化します。S3クライアントが必要な場合は、他のファクトリで初期化するか、
+// このファクトリにS3クライアントを追加する必要があります。
 func NewClientFactory(ctx context.Context) (Factory, error) {
 	// クライアントの初期化はここで一度だけ行われます。
 	client, err := storage.NewClient(ctx)
@@ -61,28 +64,30 @@ func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
 }
 
 // NewURLSigner は、GCSクライアントを注入した URLSigner の具象実装を返します。
-func (f *ClientFactory) NewURLSigner() (remoteio.URLSigner, error) { // ✅ 実装を追加
+func (f *ClientFactory) NewURLSigner() (remoteio.URLSigner, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、URLSignerを生成できません")
 	}
-	// 記憶している remoteio.NewGCSURLSigner を使用
+	// remoteio.NewGCSURLSigner を使用
+	// この実装は remoteio.URLSigner の具象型として存在すると仮定
 	return remoteio.NewGCSURLSigner(f.gcsClient), nil
 }
 
-// NewInputReader は、GCSクライアントを注入した InputReader の具象実装を返します。
+// NewInputReader は、GCSクライアントを注入した UniversalInputReader の具象実装を返します。
 func (f *ClientFactory) NewInputReader() (remoteio.InputReader, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、InputReaderを生成できません")
 	}
-	return remoteio.NewLocalGCSInputReader(f.gcsClient), nil
+	// 記憶した remoteio.NewUniversalInputReader を使用し、S3クライアントには nil を渡す。
+	return remoteio.NewUniversalInputReader(f.gcsClient, (*s3.Client)(nil)), nil
 }
 
 // NewOutputWriter は、GCSクライアントを注入した UniversalIOWriter の具象実装を返します。
-// UniversalIOWriter は GCSOutputWriter と LocalOutputWriter の両方を満たします。
 func (f *ClientFactory) NewOutputWriter() (remoteio.OutputWriter, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、OutputWriterを生成できません")
 	}
 
-	return remoteio.NewUniversalIOWriter(f.gcsClient), nil
+	// 記憶した remoteio.NewUniversalIOWriter を使用し、S3クライアントには nil を渡す。
+	return remoteio.NewUniversalIOWriter(f.gcsClient, (*s3.Client)(nil)), nil
 }

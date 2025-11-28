@@ -27,8 +27,8 @@ const (
 // gcsFactoryKey は context.Context に gcsfactory.Factory (GCS専用) を格納・取得するための非公開キー
 type gcsFactoryKey struct{}
 
-// S3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
-type S3FactoryKey struct{}
+// s3FactoryKey は context.Context に s3factory.Factory (S3専用) を格納・取得するための非公開キー
+type s3FactoryKey struct{}
 
 // AppFlags はこのアプリケーション固有の永続フラグを保持
 type AppFlags struct {
@@ -59,7 +59,7 @@ func GetFactoryFromContext(ctx context.Context) (gcsfactory.Factory, error) {
 
 // GetS3FactoryFromContext は、cmd.Context() から s3factory.Factory (S3専用) を取り出します。
 func GetS3FactoryFromContext(ctx context.Context) (s3factory.Factory, error) {
-	val := ctx.Value(S3FactoryKey{})
+	val := ctx.Value(s3FactoryKey{})
 	if val == nil {
 		return nil, fmt.Errorf("コンテキストにS3ファクトリが見つかりません。")
 	}
@@ -118,7 +118,7 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	s3Factory, s3Err := s3factory.NewS3ClientFactory(initCtx)
 	if s3Err == nil {
 		// コンテキストに S3 Factory を格納
-		newCtx = context.WithValue(newCtx, S3FactoryKey{}, s3Factory)
+		newCtx = context.WithValue(newCtx, s3FactoryKey{}, s3Factory)
 		if clibase.Flags.Verbose {
 			slog.Info("S3 Factoryを初期化しました。", slog.String("client_type", "S3"))
 		}

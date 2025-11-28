@@ -1,131 +1,102 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
-	"time"
 
-	clibase "github.com/shouni/go-cli-base"
+	"github.com/shouni/go-remote-io/pkg/remoteio"
 	"github.com/spf13/cobra"
-
-	"github.com/shouni/go-remote-io/pkg/factory"
 )
 
-const (
-	appName           = "remoteio" // アプリ名
-	defaultTimeoutSec = 10         // 秒
-)
-
-// FactoryKey は context.Context に factory.Factory を格納・取得するための非公開キー
-type FactoryKey struct{} // ★修正なし: キーの型は適切
-
-// GetFactoryFromContext は、cmd.Context() から factory.Factory を取り出す公開関数です。
-func GetFactoryFromContext(ctx context.Context) (factory.Factory, error) {
-	val := ctx.Value(FactoryKey{})
-
-	if val == nil {
-		return nil, fmt.Errorf("コンテキストにファクトリが見つかりません。")
-	}
-
-	// 型アサーションは factory.Factory インターフェースに対して行う
-	f, ok := val.(factory.Factory)
-	if !ok {
-		return nil, fmt.Errorf("コンテキストの値が期待される型 (factory.Factory) ではありません。")
-	}
-
-	return f, nil
+// gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
+var gcsCopyCmd = &cobra.Command{
+	Use:   "gcs-copy [source_path]",
+	Short: "GCS/ローカルパス間で内容を読み込み、指定された GCS/ローカルパスへ転送します。",
+	Long: `GCS URI (gs://) またはローカルファイルパスを扱います。
+このコマンドは GCS専用ファクトリに依存し、S3 URIはサポートしません。`,
+	Args: cobra.ExactArgs(1),
+	RunE: runGCSCopy,
 }
 
-// AppFlags はこのアプリケーション固有の永続フラグを保持
-type AppFlags struct {
-	TimeoutSec int // --timeout ClientFactory初期化時のコンテキストタイムアウト（秒）
+func init() {
+	// フラグは共通のものを使用
+	gcsCopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
-var appFlags AppFlags
-
-// rootCmd の定義
-var rootCmd = &cobra.Command{
-	Use:   appName,
-	Short: "リモートI/O操作のためのCLIツール。",
-	Long:  "ローカルファイルとGCS URIをサポートする、リモートI/O操作のためのCLIツールです。",
-	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
-	},
-}
-
-// --- アプリケーション固有のカスタム関数 ---
-
-// addAppPersistentFlags は、アプリケーション固有の永続フラグをルートコマンドに追加します。
-func addAppPersistentFlags(rootCmd *cobra.Command) {
-	// 1. アプリケーション固有フラグの登録
-	rootCmd.PersistentFlags().IntVar(&appFlags.TimeoutSec, "timeout", defaultTimeoutSec, "GCSリクエストのタイムアウト時間（秒）")
-}
-
-// initAppPreRunE は、clibase共通処理の後に実行される、アプリケーション固有のPersistentPreRunEです。
-// ここでFactoryを初期化し、Contextに格納します。
-func initAppPreRunE(cmd *cobra.Command, args []string) (factory.Factory, error) {
+// runGCSCopy は gcs-copy コマンドの実行ロジックです。
+func runGCSCopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+	inputPath := args[0]
 
-	// GCSクライアント初期化のためのコンテキストを設定
-	initCtx, cancel := context.WithTimeout(ctx, time.Duration(appFlags.TimeoutSec)*time.Second)
-	defer cancel() // 必ずキャンセルを呼び出す
-
-	// 2. Factory の初期化 (GCS Client が一度だけ作成される)
-	clientFactory, err := factory.NewClientFactory(initCtx)
+	// 1. GCS専用 Factory の取得
+	clientFactory, err := GetFactoryFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ClientFactoryの初期化に失敗しました: %w", err)
+		return err
 	}
 
-	if clibase.Flags.Verbose {
-		slog.Info("Factory（GCSクライアント含む）を初期化し、コンテキストに格納しました。")
+	// 2. InputReader の取得
+	inputReader, err := clientFactory.NewInputReader()
+	if err != nil {
+		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
 
-	// コマンドのコンテキストに Factory を格納
-	newCtx := context.WithValue(ctx, FactoryKey{}, clientFactory)
-	cmd.SetContext(newCtx)
+	// 3. 読み込みストリームのオープン
+	rc, err := inputReader.Open(ctx, inputPath)
+	if err != nil {
+		return fmt.Errorf("入力ストリームのオープンに失敗しました (%s): %w", inputPath, err)
+	}
+	defer rc.Close()
 
-	return clientFactory, nil
-}
+	// 4. 出力先の決定とデータの転送
+	outputPath := flags.OutputFilename
 
-// --- エントリポイント ---
-
-// Execute は、rootCmd を実行するメイン関数です。
-func Execute() {
-	// 実行時にFactoryを保持するための変数。Close()のために必要。
-	var factoryInstance factory.Factory
-
-	// 1. 永続フラグの追加と共通フラグの登録
-	addAppPersistentFlags(rootCmd)
-
-	// 2. PersistentPreRunE の設定
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		f, err := initAppPreRunE(cmd, args)
-		if err != nil {
-			return err
+	if outputPath == "" {
+		// 標準出力に出力する場合
+		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", "stdout"), slog.String("type", "Stdout"))
+		if _, err := io.Copy(os.Stdout, rc); err != nil {
+			return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
 		}
-		factoryInstance = f // Factory インスタンスを外部変数に格納
 		return nil
 	}
 
-	// 3. サブコマンドの登録
-	rootCmd.AddCommand(rcopyCmd)
-	// rootCmd.AddCommand(remoteWriteCmd) // 必要に応じて追加
-
-	// 4. defer によるリソースクリーンアップの設定 (リソースリーク対策)
-	defer func() {
-		if factoryInstance != nil {
-			if err := factoryInstance.Close(); err != nil {
-				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
-			} else if clibase.Flags.Verbose {
-				slog.Info("GCSクライアントをクローズしました。")
-			}
-		}
-	}()
-
-	// 5. rootCmd.Execute() を直接呼び出します。
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+	// S3 URIチェック (このコマンドはS3を扱わないためエラーにする)
+	if remoteio.IsS3URI(inputPath) || remoteio.IsS3URI(outputPath) {
+		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
 	}
+
+	// --- GCS / ローカルファイルに出力する場合 ---
+	writer, err := clientFactory.NewOutputWriter()
+	if err != nil {
+		return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
+	}
+
+	if remoteio.IsGCSURI(outputPath) {
+		// GCS URIが指定された場合
+		gcsWriter, ok := writer.(remoteio.GCSOutputWriter)
+		if !ok {
+			return fmt.Errorf("FactoryがGCS出力用のWriterインターフェース(remoteio.GCSOutputWriter)を提供していません")
+		}
+		bucket, object, _ := remoteio.ParseGCSURI(outputPath)
+		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "GCS"))
+
+		if err := gcsWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
+			return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
+		}
+
+	} else {
+		// ローカルファイルが指定された場合
+		localWriter, ok := writer.(remoteio.LocalOutputWriter)
+		if !ok {
+			return fmt.Errorf("Factoryがローカルファイル出力用のWriterインターフェース(remoteio.LocalOutputWriter)を提供していません")
+		}
+		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "LocalFile"))
+
+		if err := localWriter.WriteToLocal(ctx, outputPath, rc); err != nil {
+			return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
+		}
+	}
+
+	return nil
 }

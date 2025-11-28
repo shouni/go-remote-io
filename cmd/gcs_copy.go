@@ -13,15 +13,15 @@ import (
 // gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
 var gcsCopyCmd = &cobra.Command{
 	Use:   "gcs-copy [source_path]",
-	Short: "リモート/ローカルパス間で内容を読み込み、指定された出力先へ転送します。",
-	Long: `指定されたパス (ローカルファイル、または GCS URI) から io.ReadCloser を開きます。
-読み込んだ内容は、標準出力、ローカルファイル、または GCS URIで指定されたリモートパスへ転送されます。`,
+	Short: "GCS/ローカルパス間で内容を読み込み、指定された GCS/ローカルパスへ転送します。",
+	Long: `GCS URI (gs://) またはローカルファイルパスを扱います。
+このコマンドは GCS専用ファクトリに依存し、S3 URIはサポートしません。`,
 	Args: cobra.ExactArgs(1), // 1つのパス引数を必須とする
 	RunE: runGCSCopy,
 }
 
 func init() {
-	// フラグの初期化
+	// フラグは共通のものを使用
 	gcsCopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
@@ -29,30 +29,34 @@ func init() {
 func runGCSCopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
+	outputPath := flags.OutputFilename
 
-	// 1. ClientFactory の取得 (DI)
+	// 1. S3 URIチェック (修正案の適用: S3 URIを明示的に拒否)
+	if remoteio.IsS3URI(inputPath) || remoteio.IsS3URI(outputPath) {
+		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
+	}
+
+	// 2. ClientFactory の取得 (GCS専用ファクトリ)
 	clientFactory, err := GetFactoryFromContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 2. InputReader の取得 (入力依存性の注入)
+	// 3. InputReader の取得 (入力依存性の注入)
 	inputReader, err := clientFactory.NewInputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
 
-	// 3. 読み込みストリームのオープン
+	// 4. 読み込みストリームのオープン
 	rc, err := inputReader.Open(ctx, inputPath)
 	if err != nil {
 		return fmt.Errorf("入力ストリームのオープンに失敗しました (%s): %w", inputPath, err)
 	}
 	defer rc.Close() // 読み込みストリームは必ずクローズする
 
-	// 4. 出力先の決定とデータの転送
-	if flags.OutputFilename != "" {
-		outputPath := flags.OutputFilename
-
+	// 5. 出力先の決定とデータの転送
+	if outputPath != "" {
 		if remoteio.IsGCSURI(outputPath) {
 			// GCS URIが指定された場合
 			writer, err := clientFactory.NewOutputWriter()

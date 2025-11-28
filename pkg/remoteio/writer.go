@@ -10,6 +10,9 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 const DefaultContentType = "text/plain; charset=utf-8"
@@ -18,26 +21,26 @@ const DefaultContentType = "text/plain; charset=utf-8"
 // 1. インターフェース定義
 // =================================================================
 
-// OutputWriter は、GCSおよびローカルファイルシステムへの書き込みを抽象化する汎用インターフェースです。
+// OutputWriter は、GCS/S3およびローカルファイルシステムへの書き込みを抽象化する汎用インターフェースです。
 type OutputWriter interface {
-	// Write は、GCSまたはローカルファイルパス(uri)を受け取り、データ(reader)を書き込みます。
-	// GCSOutputWriterとLocalOutputWriterのメソッドは、歴史的経緯や詳細な制御のために残すことができますが、
-	// 汎用的な利用には Write を推奨します。
 	Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error
-
 	GCSOutputWriter
+	S3OutputWriter
 	LocalOutputWriter
 }
 
 // GCSOutputWriter は、Google Cloud Storage (GCS) にコンテンツを書き込むためのインターフェースです。
 type GCSOutputWriter interface {
-	// WriteToGCS は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツを書き込みます。
 	WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
+}
+
+// S3OutputWriter は、Amazon Simple Storage Service (S3) にコンテンツを書き込むためのインターフェースです。
+type S3OutputWriter interface {
+	WriteToS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
 }
 
 // LocalOutputWriter は、ローカルファイルシステムにコンテンツを書き込むためのインターフェースです。
 type LocalOutputWriter interface {
-	// WriteToLocal は、指定されたローカルパスに io.Reader からコンテンツを書き込みます。
 	WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error
 }
 
@@ -45,16 +48,16 @@ type LocalOutputWriter interface {
 // 2. 具象構造体とコンストラクタ (UniversalIOWriterへ統合)
 // =================================================================
 
-// UniversalIOWriter は GCSOutputWriter と LocalOutputWriter の両方を満たす具象型です。
+// UniversalIOWriter は GCSOutputWriter, S3OutputWriter, LocalOutputWriter のすべてを満たす具象型です。
 type UniversalIOWriter struct {
 	gcsClient *storage.Client
-	// LocalFileWriter の機能は外部依存がないため、フィールドは不要
+	s3Client  *s3.Client
 }
 
 // NewUniversalIOWriter は新しい UniversalIOWriter インスタンスを作成します。
-// Factoryはこの関数を使って、GCSクライアントを注入したI/Oライターを生成します。
-func NewUniversalIOWriter(client *storage.Client) *UniversalIOWriter {
-	return &UniversalIOWriter{gcsClient: client}
+// GCSクライアントとS3クライアントを注入します。
+func NewUniversalIOWriter(gcsClient *storage.Client, s3Client *s3.Client) *UniversalIOWriter {
+	return &UniversalIOWriter{gcsClient: gcsClient, s3Client: s3Client}
 }
 
 // =================================================================
@@ -62,19 +65,33 @@ func NewUniversalIOWriter(client *storage.Client) *UniversalIOWriter {
 // =================================================================
 
 // Write は OutputWriter インターフェースの汎用メソッドを実装します。
-// パスのプレフィックスを見て WriteToGCS または WriteToLocal へ処理を委譲します。
+// パスのプレフィックスを見て WriteToGCS, WriteToS3, または WriteToLocal へ処理を委譲します。
 func (w *UniversalIOWriter) Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error {
-	if strings.HasPrefix(uri, "gs://") {
+	// util.go の IsGCSURI を使用
+	if IsGCSURI(uri) {
 		// GCSへの書き込み
+		// util.go の ParseGCSURI を使用
 		bucketName, objectPath, err := ParseGCSURI(uri)
 		if err != nil {
-			return fmt.Errorf("GCS URIのパース失敗: %w", err)
+			// ログコメントを日本語に修正
+			return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
 		}
 		return w.WriteToGCS(ctx, bucketName, objectPath, contentReader, contentType)
-	} else {
-		// ローカルファイルへの書き込み (contentTypeは無視される)
-		return w.WriteToLocal(ctx, uri, contentReader)
 	}
+	// util.go の IsS3URI を使用
+	if IsS3URI(uri) {
+		// S3への書き込み
+		// util.go の ParseS3URI を使用
+		bucketName, objectPath, err := ParseS3URI(uri)
+		if err != nil {
+			// ログコメントを日本語に修正
+			return fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
+		}
+		return w.WriteToS3(ctx, bucketName, objectPath, contentReader, contentType)
+	}
+
+	// ローカルファイルへの書き込み (contentTypeは無視される)
+	return w.WriteToLocal(ctx, uri, contentReader)
 }
 
 // WriteToGCS は GCSOutputWriter インターフェースを実装します。
@@ -121,13 +138,46 @@ func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPa
 	return nil
 }
 
+// WriteToS3 は S3OutputWriter インターフェースを実装します。
+func (w *UniversalIOWriter) WriteToS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
+	targetURI := fmt.Sprintf("s3://%s/%s", bucketName, objectPath)
+
+	if bucketName == "" || objectPath == "" {
+		return fmt.Errorf("S3への書き込みに失敗しました: バケット名またはオブジェクトパスが空です")
+	}
+	if w.s3Client == nil {
+		return fmt.Errorf("S3への書き込みに失敗しました: S3クライアントが初期化されていません")
+	}
+
+	slog.Info("S3書き込み処理開始", slog.String("uri", targetURI), slog.String("content_type", contentType))
+
+	// S3 PutObject APIを呼び出す
+	_, err := w.s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(objectPath),
+		Body:        contentReader,
+		ContentType: aws.String(contentType),
+		// ACLやStorageClassなどのオプションも必要に応じて追加可能
+		ACL: types.ObjectCannedACLBucketOwnerFullControl,
+	})
+
+	if err != nil {
+		// ログコメントを日本語に修正
+		slog.Error("S3へのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
+		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました: %w", err)
+	}
+
+	slog.Info("S3書き込み処理完了", slog.String("uri", targetURI))
+	return nil
+}
+
 // WriteToLocal は LocalOutputWriter インターフェースを実装します。
 func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error {
 	// Contextは、ローカルファイルの操作では通常使用されないが、シグネチャを合わせる
 	_ = ctx
 	slog.Info("ローカル書き込み処理開始", slog.String("path", path))
 
-	// ★修正適用: 出力先のディレクトリが存在しない場合は作成 (os.MkdirAll)
+	// 出力先のディレクトリが存在しない場合は作成 (os.MkdirAll)
 	outputDir := filepath.Dir(path)
 	if outputDir != "" && outputDir != "." {
 		if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -152,6 +202,11 @@ func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, conte
 	return nil
 }
 
-// 型アサーションチェック (UniversalIOWriterが両方のインターフェースを満たしていることを確認)
+// =================================================================
+// 4. 型アサーションチェック
+// =================================================================
+
+// UniversalIOWriterがすべてのインターフェースを満たしていることを確認
 var _ GCSOutputWriter = (*UniversalIOWriter)(nil)
+var _ S3OutputWriter = (*UniversalIOWriter)(nil)
 var _ LocalOutputWriter = (*UniversalIOWriter)(nil)

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // =================================================================
@@ -25,17 +27,19 @@ type InputReader interface {
 // 2. 具象構造体とコンストラクタ
 // =================================================================
 
-// LocalGCSInputReader は InputReader の具象実装であり、
-// ローカルファイルと GCS オブジェクトの読み込みを処理します。
-type LocalGCSInputReader struct {
+// UniversalInputReader は InputReader の具象実装であり、
+// ローカルファイル、GCS オブジェクト、S3 オブジェクトの読み込みを処理します。
+type UniversalInputReader struct {
 	gcsClient *storage.Client
+	s3Client  *s3.Client
 }
 
-// NewLocalGCSInputReader は LocalGCSInputReader の新しいインスタンスを作成します。
-// 依存関係として GCS クライアントを注入します。
-func NewLocalGCSInputReader(gcsClient *storage.Client) *LocalGCSInputReader {
-	return &LocalGCSInputReader{
+// NewUniversalInputReader は UniversalInputReader の新しいインスタンスを作成します。
+// 依存関係として GCS クライアントと S3 クライアントを注入します。
+func NewUniversalInputReader(gcsClient *storage.Client, s3Client *s3.Client) *UniversalInputReader {
+	return &UniversalInputReader{
 		gcsClient: gcsClient,
+		s3Client:  s3Client,
 	}
 }
 
@@ -43,48 +47,41 @@ func NewLocalGCSInputReader(gcsClient *storage.Client) *LocalGCSInputReader {
 // 3. コアロジック (実装)
 // =================================================================
 
-// Open は、ファイルパスを検査し、ローカルファイルまたはGCSからストリームを開きます。
-func (r *LocalGCSInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	// GCS URI 判定ロジック
-	if strings.HasPrefix(filePath, "gs://") {
+// Open は、ファイルパスを検査し、ローカルファイル、GCS、またはS3からストリームを開きます。
+func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
+	if IsGCSURI(filePath) {
 		return r.openGCSObject(ctx, filePath)
+	}
+	if IsS3URI(filePath) {
+		return r.openS3Object(ctx, filePath)
 	}
 
 	// ローカルファイルパスの処理
 	file, err := os.Open(filePath)
 	if err != nil {
+		// ログコメントを日本語に修正
 		return nil, fmt.Errorf("ローカルファイルのオープンに失敗しました: %w", err)
 	}
 	return file, nil
 }
 
 // openGCSObject は、GCS URI からオブジェクトを読み込み、io.ReadCloser を返します。
-func (r *LocalGCSInputReader) openGCSObject(ctx context.Context, gcsURI string) (io.ReadCloser, error) {
+func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string) (io.ReadCloser, error) {
 	if r.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントが初期化されていないため、GCSオブジェクトを読み込めません (URI: %s)", gcsURI)
 	}
 
-	// URIのパースロジック
-	path := gcsURI[5:]                    // "gs://" を削除
-	parts := strings.SplitN(path, "/", 2) // バケットとオブジェクトに分割
-
-	// 1. スラッシュの数が不正な場合（例: gs://bucket）
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("無効なGCS URI形式です: %s (gs://bucket-name/object-name の形式で指定してください。スラッシュの数が不正です)", gcsURI)
-	}
-	bucketName := parts[0]
-	objectName := parts[1]
-
-	// 2. バケット名が空の場合（例: gs:///object）
-	if bucketName == "" {
-		return nil, fmt.Errorf("無効なGCS URI形式です: %s (バケット名が空です)", gcsURI)
+	// URIのパースロジック (util.go の ParseGCSURI を使用)
+	bucketName, objectName, err := ParseGCSURI(gcsURI)
+	if err != nil {
+		return nil, err
 	}
 
-	// 3. オブジェクト名が空の場合（例: gs://bucket/）
+	// util.goのParseGCSURIは gs://bucket を許容するため、InputReaderとして単一オブジェクトの
+	// 読み込みに特化させるため、オブジェクト名が空でないことを再度チェックします。
 	if objectName == "" {
-		return nil, fmt.Errorf("無効なGCS URI形式です: %s (オブジェクト名が空です。このInputReaderは単一のGCSオブジェクトの読み込みに特化しており、ディレクトリパスはサポートしていません)", gcsURI)
+		return nil, fmt.Errorf("無効なGCS URI形式: %s (オブジェクト名が空です。必須形式: gs://bucket-name/object-name)", gcsURI)
 	}
-	// GCS URI パースロジック完了
 
 	// GCS オブジェクトリーダーを作成
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
@@ -92,4 +89,37 @@ func (r *LocalGCSInputReader) openGCSObject(ctx context.Context, gcsURI string) 
 		return nil, fmt.Errorf("GCSファイルの読み込みに失敗しました (URI: %s): %w", gcsURI, err)
 	}
 	return rc, nil
+}
+
+// openS3Object は、S3 URI からオブジェクトを読み込み、io.ReadCloser を返します。
+func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (io.ReadCloser, error) {
+	if r.s3Client == nil {
+		// ログコメントを日本語に修正
+		return nil, fmt.Errorf("S3クライアントが初期化されていないため、S3オブジェクトを読み込めません (URI: %s)", s3URI)
+	}
+
+	// URIのパースロジック (util.go の ParseS3URI を使用)
+	bucketName, objectPath, err := ParseS3URI(s3URI)
+	if err != nil {
+		// ログコメントを日本語に修正
+		return nil, fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
+	}
+
+	// オブジェクトパスが空の場合はエラー（S3でも通常はオブジェクトパスが必要）
+	if objectPath == "" {
+		// ログコメントを日本語に修正
+		return nil, fmt.Errorf("無効なS3 URI形式: %s (オブジェクト名が空です。必須形式: s3://bucket-name/object-name)", s3URI)
+	}
+
+	// S3 GetObject APIを呼び出す
+	result, err := r.s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectPath),
+	})
+
+	if err != nil {
+		// ログコメントを日本語に修正
+		return nil, fmt.Errorf("S3ファイルの読み込みに失敗しました (URI: %s): %w", s3URI, err)
+	}
+	return result.Body, nil
 }

@@ -93,6 +93,7 @@ package main
 import (
     "context"
     "log"
+    "strings"
     "github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
@@ -139,7 +140,7 @@ func main() {
     
     // GCS Signerの取得
     gcsFactory, _ := factory.NewClientFactory(ctx)
-    gcsSigner, _ := gcsFactory.NewGCSURLSigner() // NewURLSignerからNewGCSURLSignerに変更
+    gcsSigner, _ := gcsFactory.NewGCSURLSigner()
     
     // S3 Signerの取得
     s3Factory, _ := s3factory.NewS3ClientFactory(ctx)
@@ -161,53 +162,62 @@ func main() {
 
 ## 💻 CLI実行方法とデータ転送の例
 
-**`rcopy`** サブコマンドは、入力元と出力先がローカルファイル、GCS URI、または S3 URI のいずれであっても、透過的なデータ転送を可能にします。
+CLIサブコマンドは、**環境特化**されており、実行時に必要なファクトリのみを初期化します。
 
-### 1\. S3オブジェクトへの転送 (Local → S3)
+### 1\. GCS環境でのデータ転送 (`gcs-copy`)
 
-ローカルファイルを読み込み、S3バケットへストリーミングで書き出します。
+GCS URIとローカルファイルのみを扱います。
 
 ```bash
-# コマンド例: ローカルファイルをS3に転送
-$ go run ./ rcopy ./local/report.json -o s3://dest-bucket/archive/report.json
+# GCSからローカルファイルへの転送
+$ go run ./ gcs-copy gs://source-bucket/data.txt -o ./output/local_data.txt
+
+# ローカルからGCSへの転送
+$ go run ./ gcs-copy ./local/report.json -o gs://dest-bucket/archive/report.json
 ```
 
-### 2\. GCSからS3への転送 (GCS → S3)
+### 2\. S3環境でのデータ転送 (`s3-copy`)
 
-GCSオブジェクトから読み込み、S3オブジェクトへ直接内容をストリーミング転送します。
+S3 URIとローカルファイルのみを扱います。
 
 ```bash
-# コマンド例: GCSからS3への転送
-$ go run ./ rcopy gs://source-bucket/file.dat -o s3://dest-bucket/archive/file.dat
+# S3オブジェクトから標準出力への転送
+$ go run ./ s3-copy s3://source-bucket/data.txt
+
+# ローカルファイルからS3バケットへの転送
+$ go run ./ s3-copy ./local/image.png -o s3://dest-bucket/archive/image.png --content-type image/png
 ```
 
 -----
 
 ## 📐 ライブラリ構成
 
+CLIサブコマンドの変更に伴い、`cmd`パッケージのファイル名が更新されました。
 
 ```
 go-remote-io/
 ├── pkg/
-│   ├── remoteio/             # I/Oの核となる機能 (クライアントに依存せず、インターフェースを実装)
+│   ├── remoteio/             # I/Oの核となる機能
 │   │   ├── reader.go       # UniversalInputReader (Local / GCS / S3 対応)
 │   │   ├── writer.go       # UniversalIOWriter (Local / GCS / S3 対応)
 │   │   ├── signer.go       # GCSURLSigner & S3URLSigner の実装
-│   │   └── util.go         # URIヘルパー関数 (IsGCSURI, ParseS3URI など) を集約
+│   │   └── util.go         # URIヘルパー関数 を集約
 │   ├── factory/              # GCS専用ファクトリ (GCS環境に特化)
 │   │   └── factory.go      # ClientFactory (GCSClientのみを管理)
 │   └── s3factory/            # S3専用ファクトリ (AWS環境に特化)
 │       └── s3_factory.go    # S3ClientFactory (S3Clientのみを管理)
 └── cmd/ 
-    └── rcopy.go         
+    ├── root.go             # CLIエントリポイントとファクトリ注入ロジック
+    ├── gcs_copy.go         # GCS/ローカルI/O専用コマンド
+    └── s3_copy.go          # S3/ローカルI/O専用コマンド
 ```
 
 ### 外部依存パッケージ
 
 本ライブラリは、以下の主要な外部パッケージに依存しています。
 
-* **GCSコア依存**: `cloud.google.com/go/storage` (Google Cloud Storage へのアクセス)
-* **AWSコア依存**: `github.com/aws/aws-sdk-go-v2/...` (Amazon S3 へのアクセスと認証)
+* **GCSコア依存**: `cloud.google.com/go/storage`
+* **AWSコア依存**: `github.com/aws/aws-sdk-go-v2/...`
 
 -----
 

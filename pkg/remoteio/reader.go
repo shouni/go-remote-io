@@ -60,7 +60,6 @@ func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.Re
 	// ローカルファイルパスの処理
 	file, err := os.Open(filePath)
 	if err != nil {
-		// ログコメントを日本語に修正
 		return nil, fmt.Errorf("ローカルファイルのオープンに失敗しました: %w", err)
 	}
 	return file, nil
@@ -98,20 +97,17 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 // openS3Object は、S3 URI からオブジェクトを読み込み、io.ReadCloser を返します。
 func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (io.ReadCloser, error) {
 	if r.s3Client == nil {
-		// ログコメントを日本語に修正
 		return nil, fmt.Errorf("S3クライアントが初期化されていないため、S3オブジェクトを読み込めません (URI: %s)", s3URI)
 	}
 
 	// URIのパースロジック (util.go の ParseS3URI を使用)
 	bucketName, objectPath, err := ParseS3URI(s3URI)
 	if err != nil {
-		// ログコメントを日本語に修正
 		return nil, fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
 	}
 
 	// オブジェクトパスが空の場合はエラー（S3でも通常はオブジェクトパスが必要）
 	if objectPath == "" {
-		// ログコメントを日本語に修正
 		return nil, fmt.Errorf("無効なS3 URI形式: %s (オブジェクト名が空です。必須形式: s3://bucket-name/object-name)", s3URI)
 	}
 

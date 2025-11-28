@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/storage"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
@@ -74,7 +73,7 @@ func (f *GCSClientFactory) NewInputReader() (remoteio.InputReader, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、InputReaderを生成できません")
 	}
-	return remoteio.NewUniversalInputReader(f.gcsClient, (*s3.Client)(nil)), nil
+	return remoteio.NewUniversalInputReader(f.gcsClient, nil), nil
 }
 
 // NewOutputWriter は、GCSクライアントを注入した UniversalIOWriter の具象実装を返します。
@@ -82,5 +81,5 @@ func (f *GCSClientFactory) NewOutputWriter() (remoteio.OutputWriter, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、OutputWriterを生成できません")
 	}
-	return remoteio.NewUniversalIOWriter(f.gcsClient, (*s3.Client)(nil)), nil
+	return remoteio.NewUniversalIOWriter(f.gcsClient, nil), nil
 }

@@ -65,10 +65,8 @@ func NewUniversalIOWriter(gcsClient *storage.Client, s3Client *s3.Client) *Unive
 // Write は OutputWriter インターフェースの汎用メソッドを実装します。
 // パスのプレフィックスを見て WriteToGCS, WriteToS3, または WriteToLocal へ処理を委譲します。
 func (w *UniversalIOWriter) Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error {
-	// util.go の IsGCSURI を使用
 	if IsGCSURI(uri) {
 		// GCSへの書き込み
-		// util.go の ParseGCSURI を使用
 		bucketName, objectPath, err := ParseGCSURI(uri)
 		if err != nil {
 			// ログコメントを日本語に修正
@@ -76,10 +74,9 @@ func (w *UniversalIOWriter) Write(ctx context.Context, uri string, contentReader
 		}
 		return w.WriteToGCS(ctx, bucketName, objectPath, contentReader, contentType)
 	}
-	// util.go の IsS3URI を使用
+
 	if IsS3URI(uri) {
 		// S3への書き込み
-		// util.go の ParseS3URI を使用
 		bucketName, objectPath, err := ParseS3URI(uri)
 		if err != nil {
 			// ログコメントを日本語に修正
@@ -158,7 +155,6 @@ func (w *UniversalIOWriter) WriteToS3(ctx context.Context, bucketName, objectPat
 	})
 
 	if err != nil {
-		// ログコメントを日本語に修正
 		slog.Error("S3へのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
 		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました: %w", err)
 	}
@@ -203,3 +199,6 @@ func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, conte
 // =================================================================
 
 var _ OutputWriter = (*UniversalIOWriter)(nil)
+var _ GCSOutputWriter = (*UniversalIOWriter)(nil)
+var _ S3OutputWriter = (*UniversalIOWriter)(nil)
+var _ LocalOutputWriter = (*UniversalIOWriter)(nil)

@@ -67,7 +67,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 			// GCS URIが指定された場合
 			writer, err := gcsFactory.NewOutputWriter()
 			if err != nil {
-				return fmt.Errorf("GCSOutputWriterの作成に失敗しました: %w", err)
+				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
 			// writerがGCSOutputWriterインターフェースを満たすかチェック
@@ -98,7 +98,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 			// ローカルファイルが指定された場合
 			writer, err := gcsFactory.NewOutputWriter()
 			if err != nil {
-				return fmt.Errorf("LocalOutputWriterの作成に失敗しました: %w", err)
+				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
 			// writerがLocalOutputWriterインターフェースを満たすかチェック

@@ -157,7 +157,7 @@ func Execute() {
 	defer func() {
 		if closer, ok := rootCmd.Context().Value(gcsFactoryCloserKey{}).(io.Closer); ok && closer != nil {
 			if err := closer.Close(); err != nil {
-				slog.Info("警告: GCSクライアントのクローズに失敗しました: %v", err)
+				slog.Warn("GCSクライアントのクローズに失敗しました", slog.Any("error", err))
 			} else if clibase.Flags.Verbose {
 				slog.Info("GCSクライアントをクローズしました。")
 			}

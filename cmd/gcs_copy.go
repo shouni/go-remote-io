@@ -10,12 +10,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// gcsCopyFlags は gcsCopyCmd 固有のフラグを保持します。
+// gcsCopyFlags は gcs-copy コマンド固有のフラグを保持します。
 type gcsCopyFlags struct {
 	OutputFilename string // -o, --output 出力ファイル名
 }
 
-var gcsFlags gcsCopyFlags // gcsCopyCmd 専用のフラグ変数
+var gcsFlags gcsCopyFlags // gcs-copy コマンド専用のフラグ変数
 
 // gcsCopyCmd は 'gcs-copy' サブコマンドを定義します。
 var gcsCopyCmd = &cobra.Command{
@@ -31,25 +31,25 @@ func init() {
 	gcsCopyCmd.Flags().StringVarP(&gcsFlags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 }
 
-// runGCSCopy は rcopy コマンドの実行ロジックです。
+// runGCSCopy は gcs-copy コマンドの実行ロジックです。
 func runGCSCopy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0] // 読み込むファイルパスまたはURI
 	outputPath := gcsFlags.OutputFilename
 
 	// 1. S3 URIチェック
-	if remoteio.IsS3URI(inputPath) || (outputPath != "" && remoteio.IsS3URI(outputPath)) {
+	if remoteio.IsS3URI(inputPath) || (outputPath != "" && remoteio.IsS3URI(outputPath)) { // S3 URIはサポートしない
 		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
 	}
 
-	// 2. ClientFactory の取得 (GCS専用ファクトリ)
-	clientFactory, err := GetFactoryFromContext(ctx)
+	// 2. GCS専用Factoryの取得
+	gcsFactory, err := GetFactoryFromContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 3. InputReader の取得 (入力依存性の注入)
-	inputReader, err := clientFactory.NewInputReader()
+	// 3. InputReader の取得
+	inputReader, err := gcsFactory.NewInputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
@@ -65,7 +65,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 	if outputPath != "" {
 		if remoteio.IsGCSURI(outputPath) {
 			// GCS URIが指定された場合
-			writer, err := clientFactory.NewOutputWriter()
+			writer, err := gcsFactory.NewOutputWriter()
 			if err != nil {
 				return fmt.Errorf("GCSOutputWriterの作成に失敗しました: %w", err)
 			}
@@ -96,7 +96,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 
 		} else {
 			// ローカルファイルが指定された場合
-			writer, err := clientFactory.NewOutputWriter()
+			writer, err := gcsFactory.NewOutputWriter()
 			if err != nil {
 				return fmt.Errorf("LocalOutputWriterの作成に失敗しました: %w", err)
 			}

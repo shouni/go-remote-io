@@ -18,7 +18,7 @@ type Factory interface {
 	// NewInputReader は GCSクライアントを注入した InputReader を生成します。
 	NewInputReader() (remoteio.InputReader, error)
 	// NewOutputWriter は GCSクライアントを注入した OutputWriter を生成します。
-	// OutputWriter は GCSOutputWriter, S3OutputWriter, LocalOutputWriter のすべてを満たします。
+	// このファクトリから生成される OutputWriter は、GCSとローカルファイルシステムへの書き込みをサポートします。
 	NewOutputWriter() (remoteio.OutputWriter, error)
 	// Close は保持しているリソースを解放します。
 	Close() error

@@ -33,7 +33,6 @@ type S3FactoryKey struct{}
 // rcopyFlags は gcsCopyCmd や s3CopyCmd で共有されるフラグを保持します。
 type rcopyFlags struct {
 	OutputFilename string // -o, --output 出力ファイル名
-	ContentType    string
 }
 
 var flags rcopyFlags // グローバルに定義
@@ -127,9 +126,6 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	if s3Err == nil {
 		// コンテキストに S3 Factory を格納
 		newCtx = context.WithValue(newCtx, S3FactoryKey{}, s3Factory)
-
-		// S3Factoryはio.Closerを実装していないため、クリーンアップのための保持は不要（修正案2を適用）
-
 		if clibase.Flags.Verbose {
 			slog.Info("S3 Factoryを初期化しました。", slog.String("client_type", "S3"))
 		}
@@ -143,7 +139,6 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	// 3. Context の更新とクリーンアップ用のインスタンス保持
-	// 複数回の SetContext() を回避するため、最後に一度だけ newCtx を設定（問題点1を修正）
 	cmd.SetContext(newCtx)
 
 	return nil

@@ -10,6 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// s3CopyFlags は s3CopyCmd 固有のフラグを保持します。
+type s3CopyFlags struct {
+	OutputFilename string // -o, --output 出力ファイル名
+	ContentType    string // -t, --content-type S3に書き込む際のMIMEタイプ
+}
+
+var s3Flags s3CopyFlags // s3CopyCmd 専用のフラグ変数
+
 // =================================================================
 // コマンド実装
 // =================================================================
@@ -25,9 +33,9 @@ var s3CopyCmd = &cobra.Command{
 }
 
 func init() {
-	// フラグは共通のものを使用
-	s3CopyCmd.Flags().StringVarP(&flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
-	s3CopyCmd.Flags().StringVarP(&flags.ContentType, "content-type", "t", "", "S3に書き込む際のMIMEタイプ（例: text/plain; charset=utf-8）")
+	// 固有のフラグ変数 s3Flags を使用するように修正
+	s3CopyCmd.Flags().StringVarP(&s3Flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
+	s3CopyCmd.Flags().StringVarP(&s3Flags.ContentType, "content-type", "t", "", "S3に書き込む際のMIMEタイプ（例: text/plain; charset=utf-8）")
 }
 
 // runS3Copy は s3-copy コマンドの実行ロジックです。
@@ -55,7 +63,7 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 	defer rc.Close()
 
 	// 4. 出力先の決定とデータの転送
-	outputPath := flags.OutputFilename
+	outputPath := s3Flags.OutputFilename
 
 	if outputPath == "" {
 		// 標準出力に出力する場合 (ロジック変更なし)
@@ -77,8 +85,8 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 	}
 
-	// ContentTypeの決定 (フラグが空の場合のフォールバックロジック)
-	contentType := flags.ContentType
+	// ContentTypeの決定
+	contentType := s3Flags.ContentType
 	if contentType == "" && remoteio.IsS3URI(outputPath) {
 		// S3 URIへの書き込みでContent-Typeが指定されていない場合、デフォルトを適用
 		// remoteio.DefaultContentType は remoteio/writer.go で定義されている
@@ -95,12 +103,13 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 		bucket, object, _ := remoteio.ParseS3URI(outputPath)
 		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath), slog.String("type", "S3"))
 
-		// ★修正適用: ContentTypeを渡す
+		// ContentTypeを渡す
 		if err := s3Writer.WriteToS3(ctx, bucket, object, rc, contentType); err != nil {
 			return fmt.Errorf("S3へのコンテンツ書き込みに失敗しました: %w", err)
 		}
 
 	} else {
+		// ローカルファイルに出力する場合
 		if err := writer.WriteToLocal(ctx, outputPath, rc); err != nil {
 			return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
 		}

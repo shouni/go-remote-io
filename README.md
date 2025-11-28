@@ -31,7 +31,7 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**�
 Goモジュールとして、以下のコマンドでプロジェクトに追加します。
 
 ```bash
-go get github.com/shouni/go-remote-io
+go get https://github.com/shouni/go-remote-io
 ```
 
 ### 2\. 利用方法（InputReader の例）
@@ -49,18 +49,22 @@ import (
     "io"
     "log"
 
-    "github.com/shouni/go-remote-io/pkg/factory" 
+    "https://github.com/shouni/go-remote-io/pkg/factory" 
 )
 
 func main() {
     ctx := context.Background()
 
-    // 1. GCS専用Factoryの初期化
+    // 1. GCS専用Factoryの初期化とクローズ
     clientFactory, err := factory.NewClientFactory(ctx)
     if err != nil {
         log.Fatalf("Factory初期化失敗: %v", err)
     }
-    defer clientFactory.Close()
+    defer func() {
+        if closeErr := clientFactory.Close(); closeErr != nil {
+            log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
+        }
+    }()
     
     // 2. InputReader の実装を取得
     reader, err := clientFactory.NewInputReader()
@@ -77,7 +81,9 @@ func main() {
             log.Printf("読み込み失敗 (%s): %v", path, err)
             continue
         }
-        // ... (読み込みロジック)
+        
+        content, _ := io.ReadAll(rc)
+        fmt.Printf("--- 読み込み元: %s ---\n%s\n", path, string(content))
         rc.Close()
     }
 }
@@ -94,7 +100,7 @@ import (
     "context"
     "log"
     "strings"
-    "github.com/shouni/go-remote-io/pkg/s3factory"
+    "https://github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {
@@ -131,8 +137,8 @@ import (
     "context"
     "log"
     "time"
-    "github.com/shouni/go-remote-io/pkg/factory"
-    "github.com/shouni/go-remote-io/pkg/s3factory"
+    "https://github.com/shouni/go-remote-io/pkg/factory"
+    "https://github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {

@@ -24,14 +24,12 @@ type Factory interface {
 	Close() error
 }
 
-// ClientFactory は Factory インターフェースを実装し、GCSクライアントと関連するI/Oコンポーネントを管理します。
-type ClientFactory struct {
+// GCSClientFactory は Factory インターフェースを実装し、GCSクライアントと関連するI/Oコンポーネントを管理します。
+type GCSClientFactory struct {
 	gcsClient *storage.Client
 }
 
-// NewGCSClientFactory は新しい Factory インターフェースの実装である ClientFactory インスタンスを作成します。
-// 注: このファクトリはGCSクライアントのみを初期化します。S3クライアントが必要な場合は、他のファクトリで初期化するか、
-// このファクトリにS3クライアントを追加する必要があります。
+// NewGCSClientFactory は新しい Factory インターフェースの実装である GCSClientFactory インスタンスを作成します。
 func NewGCSClientFactory(ctx context.Context) (Factory, error) {
 	// クライアントの初期化はここで一度だけ行われます。
 	client, err := storage.NewClient(ctx)
@@ -40,12 +38,12 @@ func NewGCSClientFactory(ctx context.Context) (Factory, error) {
 	}
 
 	// ファクトリ構造体に注入
-	return &ClientFactory{gcsClient: client}, nil
+	return &GCSClientFactory{gcsClient: client}, nil
 }
 
 // Close は保持しているGCSクライアントをクローズし、リソースを解放します。
 // クローズに成功した場合、またはクライアントが既にnilの場合はnilを返します。
-func (f *ClientFactory) Close() error {
+func (f *GCSClientFactory) Close() error {
 	if f.gcsClient != nil {
 		err := f.gcsClient.Close()
 		f.gcsClient = nil
@@ -55,38 +53,34 @@ func (f *ClientFactory) Close() error {
 }
 
 // GetGCSClient は、ファクトリが保持するGCSクライアントを返します。
-func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
+func (f *GCSClientFactory) GetGCSClient() (*storage.Client, error) {
 	if f.gcsClient == nil {
-		// クライアントがnilの場合、NewClientFactoryの失敗、またはClose()が呼び出されたことを意味する
+		// クライアントがnilの場合、NewGCSClientFactoryの失敗、またはClose()が呼び出されたことを意味する
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされています")
 	}
 	return f.gcsClient, nil
 }
 
 // NewGCSURLSigner は、GCSクライアントを注入した URLSigner の具象実装を返します。
-func (f *ClientFactory) NewGCSURLSigner() (remoteio.URLSigner, error) {
+func (f *GCSClientFactory) NewGCSURLSigner() (remoteio.URLSigner, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、URLSignerを生成できません")
 	}
-	// remoteio.NewGCSURLSigner を使用
 	return remoteio.NewGCSURLSigner(f.gcsClient), nil
 }
 
 // NewInputReader は、GCSクライアントを注入した UniversalInputReader の具象実装を返します。
-func (f *ClientFactory) NewInputReader() (remoteio.InputReader, error) {
+func (f *GCSClientFactory) NewInputReader() (remoteio.InputReader, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、InputReaderを生成できません")
 	}
-	// 記憶した remoteio.NewUniversalInputReader を使用し、S3クライアントには nil を渡す。
 	return remoteio.NewUniversalInputReader(f.gcsClient, (*s3.Client)(nil)), nil
 }
 
 // NewOutputWriter は、GCSクライアントを注入した UniversalIOWriter の具象実装を返します。
-func (f *ClientFactory) NewOutputWriter() (remoteio.OutputWriter, error) {
+func (f *GCSClientFactory) NewOutputWriter() (remoteio.OutputWriter, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、OutputWriterを生成できません")
 	}
-
-	// 記憶した remoteio.NewUniversalIOWriter を使用し、S3クライアントには nil を渡す。
 	return remoteio.NewUniversalIOWriter(f.gcsClient, (*s3.Client)(nil)), nil
 }

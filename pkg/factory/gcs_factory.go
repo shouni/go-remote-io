@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/storage"
-	"github.com/aws/aws-sdk-go-v2/service/s3" // S3クライアントの型をインポートに追加
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 )
 
@@ -13,8 +13,8 @@ import (
 type Factory interface {
 	// GetGCSClient はファクトリが保持するGCSクライアントを返します。
 	GetGCSClient() (*storage.Client, error)
-	// NewURLSigner は GCSクライアントを注入した URLSigner を生成します。
-	NewURLSigner() (remoteio.URLSigner, error)
+	// NewGCSURLSigner は GCSクライアントを注入した URLSigner を生成します。
+	NewGCSURLSigner() (remoteio.URLSigner, error)
 	// NewInputReader は GCSクライアントを注入した InputReader を生成します。
 	NewInputReader() (remoteio.InputReader, error)
 	// NewOutputWriter は GCSクライアントを注入した OutputWriter を生成します。
@@ -29,10 +29,10 @@ type ClientFactory struct {
 	gcsClient *storage.Client
 }
 
-// NewClientFactory は新しい Factory インターフェースの実装である ClientFactory インスタンスを作成します。
+// NewGCSClientFactory は新しい Factory インターフェースの実装である ClientFactory インスタンスを作成します。
 // 注: このファクトリはGCSクライアントのみを初期化します。S3クライアントが必要な場合は、他のファクトリで初期化するか、
 // このファクトリにS3クライアントを追加する必要があります。
-func NewClientFactory(ctx context.Context) (Factory, error) {
+func NewGCSClientFactory(ctx context.Context) (Factory, error) {
 	// クライアントの初期化はここで一度だけ行われます。
 	client, err := storage.NewClient(ctx)
 	if err != nil {
@@ -63,13 +63,12 @@ func (f *ClientFactory) GetGCSClient() (*storage.Client, error) {
 	return f.gcsClient, nil
 }
 
-// NewURLSigner は、GCSクライアントを注入した URLSigner の具象実装を返します。
-func (f *ClientFactory) NewURLSigner() (remoteio.URLSigner, error) {
+// NewGCSURLSigner は、GCSクライアントを注入した URLSigner の具象実装を返します。
+func (f *ClientFactory) NewGCSURLSigner() (remoteio.URLSigner, error) {
 	if f.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているため、URLSignerを生成できません")
 	}
 	// remoteio.NewGCSURLSigner を使用
-	// この実装は remoteio.URLSigner の具象型として存在すると仮定
 	return remoteio.NewGCSURLSigner(f.gcsClient), nil
 }
 

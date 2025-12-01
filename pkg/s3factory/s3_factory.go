@@ -31,7 +31,12 @@ func NewS3ClientFactory(ctx context.Context) (Factory, error) {
 	// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("AWS設定のロードに失敗しました (認証情報またはリージョン設定を確認してください): %w", err)
+		return nil, fmt.Errorf("AWS設定のロードに失敗しました (認証情報が不足しています): %w", err)
+	}
+
+	const defaultRegion = "ap-northeast-1"
+	if awsCfg.Region == "" {
+		awsCfg.Region = defaultRegion
 	}
 
 	// 2. S3 クライアントの初期化とファクトリの生成

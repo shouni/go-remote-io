@@ -63,7 +63,6 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		require.NoError(t, err)
 
 		// 検証：サブディレクトリは含まれず、直下のファイルのみが返されることを確認
-		// ファイルシステムの挙動により順序は保証されないため、ElementsMatch を使用
 		expected := []string{tmpFile, anotherFile}
 		assert.ElementsMatch(t, expected, files)
 	})
@@ -88,6 +87,18 @@ func TestUniversalInputReader_Local(t *testing.T) {
 			return expectedErr
 		})
 		assert.ErrorIs(t, err, expectedErr)
+	})
+
+	// ✨ 新規追加：ディレクトリではなくファイルパスを渡した場合のテスト
+	t.Run("List: error when path is a file", func(t *testing.T) {
+		var files []string
+		err := reader.List(ctx, tmpFile, func(path string) error {
+			files = append(files, path)
+			return nil
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ローカルディレクトリの読み込みに失敗しました")
+		assert.Empty(t, files, "ファイルパスを指定した場合、コールバックは一度も呼ばれないべきです")
 	})
 }
 

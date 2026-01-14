@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -52,18 +51,7 @@ func NewUniversalInputReader(gcsClient *storage.Client, s3Client *s3.Client) *Un
 }
 
 // =================================================================
-// 3. ヘルパー関数
-// =================================================================
-
-func ensureTrailingSlash(prefix string) string {
-	if prefix != "" && !strings.HasSuffix(prefix, "/") {
-		return prefix + "/"
-	}
-	return prefix
-}
-
-// =================================================================
-// 4. コアロジック (実装)
+// 3. コアロジック (実装)
 // =================================================================
 
 func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
@@ -105,7 +93,7 @@ func (r *UniversalInputReader) List(ctx context.Context, path string, callback f
 }
 
 // =================================================================
-// 5. GCS / S3 内部実装
+// 4. GCS / S3 内部実装
 // =================================================================
 
 func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string) (io.ReadCloser, error) {
@@ -139,7 +127,7 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 		return err
 	}
 
-	prefix = ensureTrailingSlash(prefix)
+	// プレフィックスをそのまま使用することで、前方一致による柔軟な検索を可能にします。
 	it := r.gcsClient.Bucket(bucketName).Objects(ctx, &storage.Query{Prefix: prefix})
 	for {
 		attrs, err := it.Next()
@@ -149,7 +137,8 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 		if err != nil {
 			return fmt.Errorf("GCSリスト取得失敗 (URI: %s): %w", gcsURI, err)
 		}
-		// プレフィックス自身がディレクトリを示すオブジェクトとして返される場合があるため、除外する。
+		// プレフィックス自身がディレクトリを示す0バイトオブジェクトとして返される場合があるため、
+		// リスト結果からは除外します。
 		if attrs.Name == prefix {
 			continue
 		}
@@ -196,7 +185,7 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, 
 		return err
 	}
 
-	prefix = ensureTrailingSlash(prefix)
+	// プレフィックスをそのまま使用することで、前方一致による柔軟な検索を可能にします。
 	paginator := s3.NewListObjectsV2Paginator(r.s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 		Prefix: aws.String(prefix),
@@ -208,7 +197,8 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, 
 			return fmt.Errorf("S3リスト取得失敗 (ページネーション中, URI: %s): %w", s3URI, err)
 		}
 		for _, obj := range output.Contents {
-			// プレフィックス自身がディレクトリを示すオブジェクトとして返される場合があるため、除外する。
+			// プレフィックス自身がディレクトリを示す0バイトオブジェクトとして返される場合があるため、
+			// リスト結果からは除外します。
 			if *obj.Key == prefix {
 				continue
 			}

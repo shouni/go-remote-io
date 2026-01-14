@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// IsRemoteURI は、指定されたURIがクラウドストレージ（GCSまたはS3）を指しているか判定します。
+func IsRemoteURI(uri string) bool {
+	return IsGCSURI(uri) || IsS3URI(uri)
+}
+
 // IsGCSURI は、URIが Google Cloud Storage (gs://) を指しているかどうかをチェックします。
 func IsGCSURI(uri string) bool {
 	return strings.HasPrefix(uri, "gs://")
@@ -13,11 +18,6 @@ func IsGCSURI(uri string) bool {
 // IsS3URI は、指定されたURIがS3 URI ("s3://...") であるかどうかをチェックします。
 func IsS3URI(uri string) bool {
 	return strings.HasPrefix(uri, "s3://")
-}
-
-// IsRemoteURI は、指定されたURIがクラウドストレージ（GCSまたはS3）を指しているか判定します。
-func IsRemoteURI(uri string) bool {
-	return IsGCSURI(uri) || IsS3URI(uri)
 }
 
 // ParseGCSURI は、指定されたgs://URIをバケット名とオブジェクトパスにパースします。

@@ -79,7 +79,7 @@ func (r *UniversalInputReader) List(ctx context.Context, path string, callback f
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return fmt.Errorf("ローカルディレクトリの読み込みに失敗しました: %w", err)
+		return fmt.Errorf("ローカルディレクトリの読み込みに失敗しました (path: %s): %w", path, err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -170,7 +170,7 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	if err != nil {
 		var noSuchKey *types.NoSuchKey
 		if errors.As(err, &noSuchKey) {
-			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, os.ErrNotExist)
+			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s, cause: %v): %w", s3URI, err, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("S3読み込み失敗 (URI: %s): %w", s3URI, err)
 	}

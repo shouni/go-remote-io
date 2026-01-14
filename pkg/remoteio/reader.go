@@ -122,8 +122,6 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
-		// storage.ErrObjectNotExist を os.ErrNotExist でラップすることで
-		// 共通のエラーハンドリングを可能にします。
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
 		}
@@ -134,7 +132,7 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 
 func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string, callback func(string) error) error {
 	if r.gcsClient == nil {
-		return fmt.Errorf("GCSクライアントが未初期化です")
+		return fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
 	bucketName, prefix, err := ParseGCSURI(gcsURI)
 	if err != nil {
@@ -149,9 +147,9 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("GCSリスト取得失敗: %w", err)
+			return fmt.Errorf("GCSリスト取得失敗 (URI: %s): %w", gcsURI, err)
 		}
-		// プレフィックス自身がディレクトリ用オブジェクトとして返される場合は除外します。
+		// プレフィックス自身がディレクトリを示すオブジェクトとして返される場合があるため、除外する。
 		if attrs.Name == prefix {
 			continue
 		}
@@ -171,6 +169,9 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	if err != nil {
 		return nil, err
 	}
+	if objectPath == "" {
+		return nil, fmt.Errorf("オブジェクト名が空です: %s", s3URI)
+	}
 
 	result, err := r.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
@@ -188,7 +189,7 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 
 func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, callback func(string) error) error {
 	if r.s3Client == nil {
-		return fmt.Errorf("S3クライアントが未初期化です")
+		return fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
 	bucketName, prefix, err := ParseS3URI(s3URI)
 	if err != nil {
@@ -204,10 +205,10 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, 
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
 		if err != nil {
-			return fmt.Errorf("S3リスト取得失敗 (ページネーション中): %w", err)
+			return fmt.Errorf("S3リスト取得失敗 (ページネーション中, URI: %s): %w", s3URI, err)
 		}
 		for _, obj := range output.Contents {
-			// ディレクトリを示すプレフィックス自身は除外します。
+			// プレフィックス自身がディレクトリを示すオブジェクトとして返される場合があるため、除外する。
 			if *obj.Key == prefix {
 				continue
 			}

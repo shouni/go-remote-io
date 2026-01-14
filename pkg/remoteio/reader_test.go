@@ -2,6 +2,7 @@ package remoteio
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		assert.Contains(t, err.Error(), "ローカルファイルのオープンに失敗しました")
 	})
 
-	// --- List のテスト (エッジケース拡充版なのだ！) ---
+	// --- List のテスト (エッジケースを含む) ---
 	t.Run("List: handles various local directory scenarios", func(t *testing.T) {
 		// 準備：サブディレクトリと追加ファイルを作成
 		subDir := filepath.Join(tmpDir, "subdir")
@@ -53,12 +54,16 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		anotherFile := filepath.Join(tmpDir, "another.log")
 		require.NoError(t, os.WriteFile(anotherFile, []byte("log"), 0644))
 
-		// 実行
-		files, err := reader.List(ctx, tmpDir)
+		// 実行：コールバックでファイルパスを収集
+		var files []string
+		err := reader.List(ctx, tmpDir, func(path string) error {
+			files = append(files, path)
+			return nil
+		})
 		require.NoError(t, err)
 
 		// 検証：サブディレクトリは含まれず、直下のファイルのみが返されることを確認
-		// ファイルの並び順に依存しないよう ElementsMatch を使うのだ
+		// ファイルシステムの挙動により順序は保証されないため、ElementsMatch を使用
 		expected := []string{tmpFile, anotherFile}
 		assert.ElementsMatch(t, expected, files)
 	})
@@ -68,9 +73,21 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		require.NoError(t, err)
 		defer os.RemoveAll(emptyDir)
 
-		files, err := reader.List(ctx, emptyDir)
+		var files []string
+		err = reader.List(ctx, emptyDir, func(path string) error {
+			files = append(files, path)
+			return nil
+		})
 		require.NoError(t, err)
-		assert.Empty(t, files, "空のディレクトリは空のスライスを返すべきなのだ")
+		assert.Empty(t, files, "空のディレクトリをリストした場合、結果は空であるべきです")
+	})
+
+	t.Run("List: propagates callback error", func(t *testing.T) {
+		expectedErr := errors.New("callback failed")
+		err := reader.List(ctx, tmpDir, func(path string) error {
+			return expectedErr
+		})
+		assert.ErrorIs(t, err, expectedErr)
 	})
 }
 
@@ -117,7 +134,7 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 			if tt.op == "Open" {
 				_, err = reader.Open(ctx, tt.path)
 			} else {
-				_, err = reader.List(ctx, tt.path)
+				err = reader.List(ctx, tt.path, func(string) error { return nil })
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.expectedErr)

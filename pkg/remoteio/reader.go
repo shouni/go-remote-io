@@ -26,11 +26,10 @@ type InputReader interface {
 	// Open は、指定されたパスから io.ReadCloser を返します。
 	Open(ctx context.Context, filePath string) (io.ReadCloser, error)
 
-	// List は、指定されたプレフィックス配下のファイル一覧をフルURIで返します。
-	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを返し、再帰的な探索は行いません。
-	// 【注意】大量のオブジェクトをリストするとメモリを著しく消費する可能性があるため、
-	// 数千件を超えることが予想される場合は呼び出し方に注意してください。
-	List(ctx context.Context, path string) ([]string, error)
+	// List は、指定されたプレフィックス配下の各ファイルパスに対して callback を実行します。
+	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを処理し、再帰的な探索は行いません。
+	// callback がエラーを返した場合、リスト処理は中断され、そのエラーが返されます。
+	List(ctx context.Context, path string, callback func(filePath string) error) error
 }
 
 // =================================================================
@@ -56,7 +55,6 @@ func NewUniversalInputReader(gcsClient *storage.Client, s3Client *s3.Client) *Un
 // 3. ヘルパー関数
 // =================================================================
 
-// ensureTrailingSlash は、プレフィックスが空でなく、かつ末尾にスラッシュがない場合にスラッシュを追加します。
 func ensureTrailingSlash(prefix string) string {
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		return prefix + "/"
@@ -68,7 +66,6 @@ func ensureTrailingSlash(prefix string) string {
 // 4. コアロジック (実装)
 // =================================================================
 
-// Open は、ファイルパスを検査し、ローカル、GCS、またはS3からストリームを開きます。
 func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	if IsGCSURI(filePath) {
 		return r.openGCSObject(ctx, filePath)
@@ -77,7 +74,6 @@ func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.Re
 		return r.openS3Object(ctx, filePath)
 	}
 
-	// ローカルファイルパスの処理
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("ローカルファイルのオープンに失敗しました: %w", err)
@@ -85,27 +81,27 @@ func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.Re
 	return file, nil
 }
 
-// List は、指定されたパスの種類に応じてファイル一覧を収集します。
-func (r *UniversalInputReader) List(ctx context.Context, path string) ([]string, error) {
+func (r *UniversalInputReader) List(ctx context.Context, path string, callback func(string) error) error {
 	if IsGCSURI(path) {
-		return r.listGCSObjects(ctx, path)
+		return r.listGCSObjects(ctx, path, callback)
 	}
 	if IsS3URI(path) {
-		return r.listS3Objects(ctx, path)
+		return r.listS3Objects(ctx, path, callback)
 	}
 
-	// ローカルディレクトリのリスティング
-	var files []string
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return nil, fmt.Errorf("ローカルディレクトリの読み込みに失敗しました: %w", err)
+		return fmt.Errorf("ローカルディレクトリの読み込みに失敗しました: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			files = append(files, filepath.Join(path, entry.Name()))
+			fullPath := filepath.Join(path, entry.Name())
+			if err := callback(fullPath); err != nil {
+				return err
+			}
 		}
 	}
-	return files, nil
+	return nil
 }
 
 // =================================================================
@@ -126,7 +122,8 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
-		// [Major] オブジェクト不在エラーを os.ErrNotExist でラップする
+		// storage.ErrObjectNotExist を os.ErrNotExist でラップすることで
+		// 共通のエラーハンドリングを可能にします。
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
 		}
@@ -135,18 +132,16 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 	return rc, nil
 }
 
-func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string) ([]string, error) {
+func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string, callback func(string) error) error {
 	if r.gcsClient == nil {
-		return nil, fmt.Errorf("GCSクライアントが未初期化です")
+		return fmt.Errorf("GCSクライアントが未初期化です")
 	}
 	bucketName, prefix, err := ParseGCSURI(gcsURI)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	prefix = ensureTrailingSlash(prefix)
-
-	var files []string
 	it := r.gcsClient.Bucket(bucketName).Objects(ctx, &storage.Query{Prefix: prefix})
 	for {
 		attrs, err := it.Next()
@@ -154,15 +149,18 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("GCSリスト取得失敗: %w", err)
+			return fmt.Errorf("GCSリスト取得失敗: %w", err)
 		}
-		// [Minor] プレフィックス自体がオブジェクトとして存在する場合(0バイトオブジェクト等)を除外
+		// プレフィックス自身がディレクトリ用オブジェクトとして返される場合は除外します。
 		if attrs.Name == prefix {
 			continue
 		}
-		files = append(files, fmt.Sprintf("gs://%s/%s", bucketName, attrs.Name))
+		fullPath := fmt.Sprintf("gs://%s/%s", bucketName, attrs.Name)
+		if err := callback(fullPath); err != nil {
+			return err
+		}
 	}
-	return files, nil
+	return nil
 }
 
 func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (io.ReadCloser, error) {
@@ -173,16 +171,12 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	if err != nil {
 		return nil, err
 	}
-	if objectPath == "" {
-		return nil, fmt.Errorf("オブジェクト名が空です: %s", s3URI)
-	}
 
 	result, err := r.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(objectPath),
 	})
 	if err != nil {
-		// [Major] NoSuchKeyエラーを os.ErrNotExist でラップする
 		var noSuchKey *types.NoSuchKey
 		if errors.As(err, &noSuchKey) {
 			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, os.ErrNotExist)
@@ -192,35 +186,36 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	return result.Body, nil
 }
 
-func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string) ([]string, error) {
+func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, callback func(string) error) error {
 	if r.s3Client == nil {
-		return nil, fmt.Errorf("S3クライアントが未初期化です")
+		return fmt.Errorf("S3クライアントが未初期化です")
 	}
 	bucketName, prefix, err := ParseS3URI(s3URI)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	prefix = ensureTrailingSlash(prefix)
-
 	paginator := s3.NewListObjectsV2Paginator(r.s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 		Prefix: aws.String(prefix),
 	})
 
-	var files []string
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("S3リスト取得失敗 (ページネーション中): %w", err)
+			return fmt.Errorf("S3リスト取得失敗 (ページネーション中): %w", err)
 		}
 		for _, obj := range output.Contents {
-			// [Minor] プレフィックス自体がオブジェクトとして存在する場合(0バイトオブジェクト等)を除外
+			// ディレクトリを示すプレフィックス自身は除外します。
 			if *obj.Key == prefix {
 				continue
 			}
-			files = append(files, fmt.Sprintf("s3://%s/%s", bucketName, *obj.Key))
+			fullPath := fmt.Sprintf("s3://%s/%s", bucketName, *obj.Key)
+			if err := callback(fullPath); err != nil {
+				return err
+			}
 		}
 	}
-	return files, nil
+	return nil
 }

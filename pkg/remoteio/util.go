@@ -15,6 +15,11 @@ func IsS3URI(uri string) bool {
 	return strings.HasPrefix(uri, "s3://")
 }
 
+// IsRemoteURI は、指定されたURIがクラウドストレージ（GCSまたはS3）を指しているか判定します。
+func IsRemoteURI(uri string) bool {
+	return IsGCSURI(uri) || IsS3URI(uri)
+}
+
 // ParseGCSURI は、指定されたgs://URIをバケット名とオブジェクトパスにパースします。
 // URIが "gs://" で始まっていない場合、または形式が正しくない場合はエラーを返します。
 func ParseGCSURI(uri string) (bucketName string, objectPath string, err error) {

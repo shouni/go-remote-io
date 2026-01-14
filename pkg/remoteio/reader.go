@@ -2,6 +2,7 @@ package remoteio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"google.golang.org/api/iterator"
 )
 
@@ -26,6 +28,8 @@ type InputReader interface {
 
 	// List は、指定されたプレフィックス配下のファイル一覧をフルURIで返します。
 	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを返し、再帰的な探索は行いません。
+	// 【注意】大量のオブジェクトをリストするとメモリを著しく消費する可能性があるため、
+	// 数千件を超えることが予想される場合は呼び出し方に注意してください。
 	List(ctx context.Context, path string) ([]string, error)
 }
 
@@ -122,7 +126,11 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("GCS読み込み失敗: %w", err)
+		// [Major] オブジェクト不在エラーを os.ErrNotExist でラップする
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
+		}
+		return nil, fmt.Errorf("GCS読み込み失敗 (URI: %s): %w", gcsURI, err)
 	}
 	return rc, nil
 }
@@ -148,6 +156,7 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 		if err != nil {
 			return nil, fmt.Errorf("GCSリスト取得失敗: %w", err)
 		}
+		// [Minor] プレフィックス自体がオブジェクトとして存在する場合(0バイトオブジェクト等)を除外
 		if attrs.Name == prefix {
 			continue
 		}
@@ -173,7 +182,12 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 		Key:    aws.String(objectPath),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("S3読み込み失敗: %w", err)
+		// [Major] NoSuchKeyエラーを os.ErrNotExist でラップする
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &noSuchKey) {
+			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, os.ErrNotExist)
+		}
+		return nil, fmt.Errorf("S3読み込み失敗 (URI: %s): %w", s3URI, err)
 	}
 	return result.Body, nil
 }
@@ -189,7 +203,6 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string) 
 
 	prefix = ensureTrailingSlash(prefix)
 
-	// ページネータを使用して1000件超のオブジェクトも確実に取得するのだ！
 	paginator := s3.NewListObjectsV2Paginator(r.s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 		Prefix: aws.String(prefix),
@@ -202,6 +215,7 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string) 
 			return nil, fmt.Errorf("S3リスト取得失敗 (ページネーション中): %w", err)
 		}
 		for _, obj := range output.Contents {
+			// [Minor] プレフィックス自体がオブジェクトとして存在する場合(0バイトオブジェクト等)を除外
 			if *obj.Key == prefix {
 				continue
 			}

@@ -16,7 +16,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 	ctx := context.Background()
 	reader := NewUniversalInputReader(nil, nil)
 
-	// テスト用の一時ディレクトリとファイルを作成
+	// テスト用の一時ディレクトリを作成
 	tmpDir, err := os.MkdirTemp("", "remoteio_test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -43,12 +43,34 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		assert.Contains(t, err.Error(), "ローカルファイルのオープンに失敗しました")
 	})
 
-	// --- List のテスト (新規追加なのだ！) ---
-	t.Run("List: success listing local directory", func(t *testing.T) {
+	// --- List のテスト (エッジケース拡充版なのだ！) ---
+	t.Run("List: handles various local directory scenarios", func(t *testing.T) {
+		// 準備：サブディレクトリと追加ファイルを作成
+		subDir := filepath.Join(tmpDir, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(subDir, "subfile.txt"), []byte("sub"), 0644))
+
+		anotherFile := filepath.Join(tmpDir, "another.log")
+		require.NoError(t, os.WriteFile(anotherFile, []byte("log"), 0644))
+
+		// 実行
 		files, err := reader.List(ctx, tmpDir)
 		require.NoError(t, err)
-		assert.Len(t, files, 1)
-		assert.Equal(t, tmpFile, files[0])
+
+		// 検証：サブディレクトリは含まれず、直下のファイルのみが返されることを確認
+		// ファイルの並び順に依存しないよう ElementsMatch を使うのだ
+		expected := []string{tmpFile, anotherFile}
+		assert.ElementsMatch(t, expected, files)
+	})
+
+	t.Run("List: success listing empty directory", func(t *testing.T) {
+		emptyDir, err := os.MkdirTemp("", "empty_dir")
+		require.NoError(t, err)
+		defer os.RemoveAll(emptyDir)
+
+		files, err := reader.List(ctx, emptyDir)
+		require.NoError(t, err)
+		assert.Empty(t, files, "空のディレクトリは空のスライスを返すべきなのだ")
 	})
 }
 
@@ -104,7 +126,6 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 }
 
 // 3. インターフェース満足度のテスト
-// Listメソッドが実装されていないとここでコンパイルエラーになるのだ！
 func TestInputReader_InterfaceSatisfaction(t *testing.T) {
 	var _ InputReader = (*UniversalInputReader)(nil)
 }

@@ -111,7 +111,8 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
-			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
+			// 元のエラー(err)をメッセージに含め、os.ErrNotExistでラップする
+			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s, cause: %v): %w", gcsURI, err, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("GCS読み込み失敗 (URI: %s): %w", gcsURI, err)
 	}
@@ -135,7 +136,7 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("GCSリスト取得失敗 (URI: %s): %w", gcsURI, err)
+			return fmt.Errorf("GCSリスト取得失敗 (イテレーション中, URI: %s): %w", gcsURI, err)
 		}
 		// プレフィックス自身がディレクトリを示す0バイトオブジェクトとして返される場合があるため、
 		// リスト結果からは除外します。

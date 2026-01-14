@@ -114,7 +114,7 @@ err := writer.Write(ctx, "gs://my-bucket/hello.txt", content, "text/plain")
 
 ```
 
-### 3\. 利用方法（URLSigner の例: 期限付きURLの生成）
+### 4. 利用方法（URLSigner の例: 期限付きURLの生成）
 
 GCSとS3のSignerは、それぞれのファクトリから取得します。
 

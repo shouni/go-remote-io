@@ -26,17 +26,14 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**�
 
 ## 🛠️ インストールと利用
 
-### 1\. ライブラリのインストール
-
-Goモジュールとして、以下のコマンドでプロジェクトに追加します。
+### 1. ライブラリのインストール
 
 ```bash
 go get github.com/shouni/go-remote-io
+
 ```
 
-### 2\. 利用方法（InputReader の例）
-
-使用するクラウド環境に合わせて、適切なファクトリを初期化します。
+### 2. 利用方法（InputReader: 読み込みと列挙）
 
 #### A. GCS環境での利用 (`gcsfactory`パッケージを使用)
 
@@ -89,41 +86,31 @@ func main() {
 }
 ```
 
-#### B. S3環境での利用 (`s3factory`パッケージを使用)
+#### ファイルを列挙する (`List`)
 
-S3専用のファクトリを使用することで、GCP関連の認証情報やSDKへの依存性を排除できます。
+`List` は指定されたプレフィックスに基づき、見つかったパスごとにコールバックを実行します。
 
 ```go
-package main
-
-import (
-    "context"
-    "log"
-    "strings"
-    "github.com/shouni/go-remote-io/pkg/s3factory"
-)
-
-func main() {
-    ctx := context.Background()
-    
-    // 1. S3専用Factoryの初期化 (AWS Configのみをロード)
-    s3Factory, err := s3factory.NewS3ClientFactory(ctx)
-    if err != nil {
-        log.Fatalf("S3 Factory初期化失敗: %v", err)
+prefix := "s3://my-bucket/logs/2026/"
+err := reader.List(ctx, prefix, func(filePath string) error {
+    // 条件に合うファイルだけを抽出したり、その場で処理できるのだ
+    if strings.HasSuffix(filePath, ".log") {
+        fmt.Printf("Found log: %s\n", filePath)
     }
-    
-    // 2. OutputWriter を取得
-    writer, _ := s3Factory.NewOutputWriter()
-    
-    // 3. S3とローカルファイルに書き込む
-    s3URI := "s3://my-aws-bucket/output/result.txt"
-    content := "S3専用環境からの書き込みです"
-    
-    if err := writer.Write(ctx, s3URI, strings.NewReader(content), "text/plain"); err != nil {
-        log.Fatalf("S3への書き込みに失敗しました: %v", err)
-    }
-    log.Printf("✅ S3への書き込みが完了しました: %s", s3URI)
-}
+    return nil // nilを返すと次のファイルへ、エラーを返すと処理を中断するのだ
+})
+
+```
+
+### 3. 利用方法（OutputWriter: 書き込み）
+
+```go
+writer, _ := factory.NewOutputWriter()
+content := strings.NewReader("Hello, Remote IO!")
+
+// 書き込み先が Local / GCS / S3 でもシグネチャは変わらないのだ
+err := writer.Write(ctx, "gs://my-bucket/hello.txt", content, "text/plain")
+
 ```
 
 ### 3\. 利用方法（URLSigner の例: 期限付きURLの生成）
@@ -181,68 +168,51 @@ func main() {
 }
 ```
 
------
+---
 
-## 💻 CLI実行方法とデータ転送の例
+## 💻 CLI実行方法
 
-CLIサブコマンドは、**環境特化**されており、実行時に必要なファクトリのみを初期化します。
-
-### 1\. GCS環境でのデータ転送 (`gcs-copy`)
-
-GCS URIとローカルファイルのみを扱います。
+CLIサブコマンドは環境ごとに最適化されており、必要な認証情報のみを使用して動作します。
 
 ```bash
-# GCSからローカルファイルへの転送
-$ go run ./ gcs-copy gs://source-bucket/data.txt -o ./output/local_data.txt
+# GCSとローカル間でのコピー
+$ go run ./ gcs-copy gs://source-bucket/image.png -o ./local/image.png
 
-# ローカルからGCSへの転送
-$ go run ./ gcs-copy ./local/report.json -o gs://dest-bucket/archive/report.json
+# S3とローカル間でのコピー
+$ go run ./ s3-copy ./local/data.csv -o s3://dest-bucket/data.csv --content-type text/csv
+
 ```
 
-### 2\. S3環境でのデータ転送 (`s3-copy`)
-
-S3 URIとローカルファイルのみを扱います。
-
-```bash
-# S3オブジェクトから標準出力への転送
-$ go run ./ s3-copy s3://source-bucket/data.txt
-
-# ローカルファイルからS3バケットへの転送
-$ go run ./ s3-copy ./local/image.png -o s3://dest-bucket/archive/image.png --content-type image/png
-```
-
------
+---
 
 ## 📐 ライブラリ構成
-
-CLIサブコマンドの変更に伴い、`cmd`パッケージのファイル名が更新されました。
 
 ```
 go-remote-io/
 ├── pkg/
-│   ├── remoteio/             # I/Oの核となる機能
-│   │   ├── reader.go       # UniversalInputReader (Local / GCS / S3 対応)
-│   │   ├── writer.go       # UniversalIOWriter (Local / GCS / S3 対応)
-│   │   ├── signer.go       # GCSURLSigner & S3URLSigner の実装
-│   │   └── util.go         # URIヘルパー関数 を集約
-│   ├── gcsfactory/              # GCS専用ファクトリ (GCS環境に特化)
-│   │   └── gcs_factory.go      # GCSClientFactory (GCSClientのみを管理)
-│   └── s3factory/            # S3専用ファクトリ (AWS環境に特化)
-│       └── s3_factory.go    # S3ClientFactory (S3Clientのみを管理)
+│   ├── remoteio/        # I/Oの核となる機能
+│   │   ├── reader.go    # UniversalInputReader (Open / List)
+│   │   ├── writer.go    # UniversalOutputWriter (Write)
+│   │   ├── signer.go    # URLSigner の実装
+│   │   └── util.go      # URI解析・バリデーション
+│   ├── gcsfactory/      # GCS専用ファクトリ
+│   └── s3factory/       # S3専用ファクトリ
 └── cmd/ 
-    ├── root.go             # CLIエントリポイントとファクトリ注入ロジック
-    ├── gcs_copy.go         # GCS/ローカルI/O専用コマンド
-    └── s3_copy.go          # S3/ローカルI/O専用コマンド
+    ├── root.go          # CLIエントリポイント
+    ├── gcs_copy.go      # GCS/ローカル専用コマンド
+    └── s3_copy.go       # S3/ローカル専用コマンド
+
 ```
 
-### 外部依存パッケージ
+### 🛠️ 主要な依存関係 (Dependencies)
 
-本ライブラリは、以下の主要な外部パッケージに依存しています。
+| サービス | パッケージ / リンク | 説明 |
+| :--- | :--- | :--- |
+| **GCS** | [cloud.google.com/go/storage](https://github.com/googleapis/google-cloud-go/tree/main/storage) | Google Cloud Storage 公式 Go クライアント |
+| **AWS S3** | [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) | AWS SDK for Go v2 (S3/Config/Signer) |
+| **Testing** | [testify](https://github.com/stretchr/testify) | アサーションおよびモック用テストフレームワーク |
 
-* **GCSコア依存**: `cloud.google.com/go/storage`
-* **AWSコア依存**: `github.com/aws/aws-sdk-go-v2/...`
-
------
+---
 
 ### 📜 ライセンス (License)
 

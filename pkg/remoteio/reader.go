@@ -111,8 +111,7 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 	rc, err := r.gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
-			// 元のエラー(err)をメッセージに含め、os.ErrNotExistでラップする
-			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s, cause: %v): %w", gcsURI, err, os.ErrNotExist)
+			return nil, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("GCS読み込み失敗 (URI: %s): %w", gcsURI, err)
 	}
@@ -170,7 +169,7 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	if err != nil {
 		var noSuchKey *types.NoSuchKey
 		if errors.As(err, &noSuchKey) {
-			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s, cause: %v): %w", s3URI, err, os.ErrNotExist)
+			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("S3読み込み失敗 (URI: %s): %w", s3URI, err)
 	}

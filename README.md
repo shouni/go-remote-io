@@ -31,7 +31,6 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**�
 
 ```bash
 go get github.com/shouni/go-remote-io
-
 ```
 
 ### 2. 利用方法（InputReader: 読み込みと列挙）
@@ -42,48 +41,61 @@ go get github.com/shouni/go-remote-io
 package main
 
 import (
-    "context"
-    "fmt"
-    "io"
-    "log"
+	"context"
+	"fmt"
+	"io"
+	"log"
 
-    "github.com/shouni/go-remote-io/pkg/gcsfactory" 
+	"github.com/shouni/go-remote-io/pkg/gcsfactory"
 )
 
 func main() {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    // 1. GCS専用Factoryの初期化とクローズ
-	gcsFactory, err := gcsfactory.NewGCSClientFactory(ctx)
-    if err != nil {
-        log.Fatalf("Factory初期化失敗: %v", err)
-    }
-    defer func() {
-        if closeErr := gcsFactory.Close(); closeErr != nil {
-            log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
-        }
-    }()
-    
-    // 2. InputReader の実装を取得
-    reader, err := gcsFactory.NewInputReader()
-    if err != nil {
-        log.Fatalf("InputReader生成失敗: %v", err)
-    }
-    
-    // 3. ローカルファイル、または GCS URI で利用可能
-    paths := []string{"./local_file.txt", "gs://my-bucket/remote_data.csv"}
+	// 1. Factory初期化
+	factory, err := gcsfactory.NewGCSClientFactory(ctx)
+	if err != nil {
+		log.Fatalf("Factory初期化失敗: %v", err)
+	}
+	// 変数の衝突（シャドーイング）を避け、closeErr を使用
+	defer func() {
+		if closeErr := factory.Close(); closeErr != nil {
+			log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
+		}
+	}()
 
-    for _, path := range paths {
-        rc, err := reader.Open(ctx, path)
-        if err != nil {
-            log.Printf("読み込み失敗 (%s): %v", path, err)
-            continue
-        }
-        
-        content, _ := io.ReadAll(rc)
-        fmt.Printf("--- 読み込み元: %s ---\n%s\n", path, string(content))
-        rc.Close()
-    }
+	// 2. InputReader を取得
+	reader, err := factory.InputReader()
+	if err != nil {
+		log.Fatalf("InputReader取得失敗: %v", err)
+	}
+
+	// 3. ローカルファイル、または GCS URI で利用可能
+	paths := []string{"./local_file.txt", "gs://my-bucket/remote_data.csv"}
+
+	for _, path := range paths {
+		// 各ループごとにリソースを確実に解放するため、無名関数でラップする
+		func(p string) {
+			rc, err := reader.Open(ctx, p)
+			if err != nil {
+				log.Printf("読み込み失敗 (%s): %v", p, err)
+				return
+			}
+			defer func() {
+				if closeErr := rc.Close(); closeErr != nil {
+					log.Printf("警告: クローズに失敗しました (%s): %v", p, closeErr)
+				}
+			}()
+
+			content, err := io.ReadAll(rc)
+			if err != nil {
+				log.Printf("コンテンツの読み込みに失敗しました (%s): %v", p, err)
+				return
+			}
+
+			fmt.Printf("--- 読み込み元: %s ---\n%s\n", p, string(content))
+		}(path)
+	}
 }
 ```
 
@@ -94,24 +106,26 @@ func main() {
 ```go
 prefix := "s3://my-bucket/logs/2026/"
 err := reader.List(ctx, prefix, func(filePath string) error {
-    // 条件に合うファイルだけを抽出したり、その場で処理できるのだ
-    if strings.HasSuffix(filePath, ".log") {
-        fmt.Printf("Found log: %s\n", filePath)
-    }
-    return nil // nilを返すと次のファイルへ、エラーを返すと処理を中断するのだ
+	if strings.HasSuffix(filePath, ".log") {
+		fmt.Printf("Found log: %s\n", filePath)
+	}
+	return nil
 })
-
 ```
 
 ### 3. 利用方法（OutputWriter: 書き込み）
 
 ```go
-writer, _ := factory.NewOutputWriter()
+writer, err := factory.OutputWriter()
+if err != nil {
+	log.Fatalf("OutputWriter取得失敗: %v", err)
+}
+
 content := strings.NewReader("Hello, Remote IO!")
-
-// 書き込み先が Local / GCS / S3 でもシグネチャは変わらないのだ
-err := writer.Write(ctx, "gs://my-bucket/hello.txt", content, "text/plain")
-
+err = writer.Write(ctx, "gs://my-bucket/hello.txt", content, "text/plain")
+if err != nil {
+	log.Fatalf("書き込み失敗: %v", err)
+}
 ```
 
 ### 4. 利用方法（URLSigner の例: 期限付きURLの生成）
@@ -122,50 +136,53 @@ GCSとS3のSignerは、それぞれのファクトリから取得します。
 package main
 
 import (
-    "context"
-    "log"
-    "time"
-    "github.com/shouni/go-remote-io/pkg/gcsfactory"
-    "github.com/shouni/go-remote-io/pkg/s3factory"
+	"context"
+	"log"
+	"time"
+
+	"github.com/shouni/go-remote-io/pkg/gcsfactory"
+	"github.com/shouni/go-remote-io/pkg/s3factory"
 )
 
 func main() {
-    ctx := context.Background()
-    expires := 15 * time.Minute
-    
-    // GCS Signerの取得 (GCS専用ファクトリを使用)
-    gcsFactory, err := gcsfactory.NewGCSClientFactory(ctx)
-    if err != nil {
-        log.Fatalf("GCS Factory初期化失敗: %v", err)
-    }
-    gcsSigner, err := gcsFactory.NewGCSURLSigner()
-    if err != nil {
-        log.Fatalf("GCS URLSigner生成失敗: %v", err)
-    }
+	ctx := context.Background()
+	expires := 15 * time.Minute
 
-    // S3 Signerの取得 (S3専用ファクトリを使用)
-    s3Factory, err := s3factory.NewS3ClientFactory(ctx)
-    if err != nil {
-        log.Fatalf("S3 Factory初期化失敗: %v", err)
-    }
-    s3Signer, err := s3Factory.NewS3URLSigner()
-    if err != nil {
-        log.Fatalf("S3 URLSigner生成失敗: %v", err)
-    }
+	// GCS
+	gcsFactory, err := gcsfactory.NewGCSClientFactory(ctx)
+	if err != nil {
+		log.Fatalf("GCS Factory初期化失敗: %v", err)
+	}
+	defer func() { _ = gcsFactory.Close() }()
 
-    // GCS 署名付きURLを生成
-    gcsSignedURL, err := gcsSigner.GenerateSignedURL(ctx, "gs://my-bucket/report.pdf", "GET", expires)
-    if err != nil {
-        log.Fatalf("GCS署名付きURL生成失敗: %v", err)
-    }
-    log.Printf("✅ GCS Signed URL: %s", gcsSignedURL)
-    
-    // S3 署名付きURLを生成
-    s3SignedURL, err := s3Signer.GenerateSignedURL(ctx, "s3://my-bucket/data.csv", "PUT", expires)
-    if err != nil {
-        log.Fatalf("S3署名付きURL生成失敗: %v", err)
-    }
-    log.Printf("✅ S3 Signed URL: %s", s3SignedURL)
+	gcsSigner, err := gcsFactory.URLSigner()
+	if err != nil {
+		log.Fatalf("GCS URLSigner取得失敗: %v", err)
+	}
+
+	gcsSignedURL, err := gcsSigner.GenerateSignedURL(ctx, "gs://my-bucket/report.pdf", "GET", expires)
+	if err != nil {
+		log.Fatalf("GCS署名付きURL生成失敗: %v", err)
+	}
+	log.Printf("✅ GCS Signed URL: %s", gcsSignedURL)
+
+	// S3
+	s3Factory, err := s3factory.NewS3ClientFactory(ctx)
+	if err != nil {
+		log.Fatalf("S3 Factory初期化失敗: %v", err)
+	}
+	defer func() { _ = s3Factory.Close() }() // S3はno-op CloseでもOK
+
+	s3Signer, err := s3Factory.URLSigner()
+	if err != nil {
+		log.Fatalf("S3 URLSigner取得失敗: %v", err)
+	}
+
+	s3SignedURL, err := s3Signer.GenerateSignedURL(ctx, "s3://my-bucket/data.csv", "PUT", expires)
+	if err != nil {
+		log.Fatalf("S3署名付きURL生成失敗: %v", err)
+	}
+	log.Printf("✅ S3 Signed URL: %s", s3SignedURL)
 }
 ```
 
@@ -191,18 +208,18 @@ $ go run ./ s3-copy ./local/data.csv -o s3://dest-bucket/data.csv --content-type
 ```
 go-remote-io/
 ├── pkg/
-│   ├── remoteio/        # I/Oの核となる機能
-│   │   ├── reader.go    # UniversalInputReader (Open / List)
-│   │   ├── writer.go    # UniversalOutputWriter (Write)
-│   │   ├── signer.go    # URLSigner の実装
-│   │   └── util.go      # URI解析・バリデーション
-│   ├── gcsfactory/      # GCS専用ファクトリ
-│   └── s3factory/       # S3専用ファクトリ
-└── cmd/ 
-    ├── root.go          # CLIエントリポイント
-    ├── gcs_copy.go      # GCS/ローカル専用コマンド
-    └── s3_copy.go       # S3/ローカル専用コマンド
-
+│   ├── remoteio/             # I/Oの核となる機能（インターフェース + Universal実装）
+│   │   ├── interfaces.go     # IOFactory / InputReader / OutputWriter / URLSigner の定義
+│   │   ├── reader.go         # UniversalInputReader (Open / List)
+│   │   ├── writer.go         # UniversalIOWriter (Write)
+│   │   ├── signer.go         # GCS/S3 URLSigner 実装（URIに応じた署名URL生成）
+│   │   └── util.go           # URI判定・解析（IsGCSURI/IsS3URI/Parse...）
+│   ├── gcsfactory/           # GCS専用Factory（GCS client 初期化・Close・各コンポーネント提供）
+│   └── s3factory/            # S3専用Factory（S3 client 初期化・no-op Close・各コンポーネント提供）
+└── cmd/
+    ├── root.go               # CLIエントリポイント
+    ├── gcs_copy.go           # GCS/ローカル向けコマンド（GCS factory を利用）
+    └── s3_copy.go            # S3/ローカル向けコマンド（S3 factory を利用）
 ```
 
 ### 🛠️ 主要な依存関係 (Dependencies)

@@ -91,7 +91,4 @@ func TestUniversalIOWriter_Validation(t *testing.T) {
 // 4. インターフェース満足度のテスト
 func TestInterfaceSatisfaction(t *testing.T) {
 	var _ OutputWriter = (*UniversalIOWriter)(nil)
-	var _ GCSOutputWriter = (*UniversalIOWriter)(nil)
-	var _ S3OutputWriter = (*UniversalIOWriter)(nil)
-	var _ LocalOutputWriter = (*UniversalIOWriter)(nil)
 }

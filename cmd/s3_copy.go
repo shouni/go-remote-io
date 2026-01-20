@@ -50,7 +50,7 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. InputReader の取得
-	inputReader, err := s3Factory.NewInputReader()
+	inputReader, err := s3Factory.InputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
@@ -79,7 +79,7 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("このコマンドはGCS URI (gs://) をサポートしていません。gcs-copy コマンドを使用してください。")
 	}
 
-	writer, err := s3Factory.NewOutputWriter()
+	writer, err := s3Factory.OutputWriter()
 	if err != nil {
 		return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 	}

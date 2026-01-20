@@ -15,26 +15,6 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// =================================================================
-// 1. インターフェース定義
-// =================================================================
-
-// InputReader は、ローカルファイルパスまたはリモートURIから
-// 読み取りストリームを開き、一覧を取得するためのインターフェースを定義します。
-type InputReader interface {
-	// Open は、指定されたパスから io.ReadCloser を返します。
-	Open(ctx context.Context, filePath string) (io.ReadCloser, error)
-
-	// List は、指定されたプレフィックス配下の各ファイルパスに対して callback を実行します。
-	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを処理し、再帰的な探索は行いません。
-	// callback がエラーを返した場合、リスト処理は中断され、そのエラーが返されます。
-	List(ctx context.Context, path string, callback func(filePath string) error) error
-}
-
-// =================================================================
-// 2. 具象構造体とコンストラクタ
-// =================================================================
-
 // UniversalInputReader は InputReader の具象実装であり、
 // ローカルファイル、GCS オブジェクト、S3 オブジェクトを処理します。
 type UniversalInputReader struct {
@@ -51,7 +31,7 @@ func NewUniversalInputReader(gcsClient *storage.Client, s3Client *s3.Client) *Un
 }
 
 // =================================================================
-// 3. コアロジック (実装)
+// コアロジック (実装)
 // =================================================================
 
 func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
@@ -93,7 +73,7 @@ func (r *UniversalInputReader) List(ctx context.Context, path string, callback f
 }
 
 // =================================================================
-// 4. GCS / S3 内部実装
+// GCS / S3 内部実装
 // =================================================================
 
 func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string) (io.ReadCloser, error) {

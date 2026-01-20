@@ -57,9 +57,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Factory初期化失敗: %v", err)
 	}
+	// 変数の衝突（シャドーイング）を避け、closeErr を使用
 	defer func() {
-		if err := factory.Close(); err != nil {
-			log.Printf("警告: Factoryのクローズに失敗しました: %v", err)
+		if closeErr := factory.Close(); closeErr != nil {
+			log.Printf("警告: Factoryのクローズに失敗しました: %v", closeErr)
 		}
 	}()
 
@@ -73,28 +74,27 @@ func main() {
 	paths := []string{"./local_file.txt", "gs://my-bucket/remote_data.csv"}
 
 	for _, path := range paths {
-		rc, err := reader.Open(ctx, path)
-		if err != nil {
-			log.Printf("読み込み失敗 (%s): %v", path, err)
-			continue
-		}
-
-		content, err := io.ReadAll(rc)
-		if err != nil {
-			log.Printf("コンテンツの読み込みに失敗しました (%s): %v", path, err)
-			// エラーが発生した場合でも、リソースのクローズを試みる
-			if closeErr := rc.Close(); closeErr != nil {
-				log.Printf("警告: クローズに失敗しました (%s): %v", path, closeErr)
+		// 各ループごとにリソースを確実に解放するため、無名関数でラップする
+		func(p string) {
+			rc, err := reader.Open(ctx, p)
+			if err != nil {
+				log.Printf("読み込み失敗 (%s): %v", p, err)
+				return
 			}
-			continue
-		}
+			defer func() {
+				if closeErr := rc.Close(); closeErr != nil {
+					log.Printf("警告: クローズに失敗しました (%s): %v", p, closeErr)
+				}
+			}()
 
-		fmt.Printf("--- 読み込み元: %s ---\n%s\n", path, string(content))
+			content, err := io.ReadAll(rc)
+			if err != nil {
+				log.Printf("コンテンツの読み込みに失敗しました (%s): %v", p, err)
+				return
+			}
 
-		// 処理が正常に完了した後にリソースをクローズする
-		if err := rc.Close(); err != nil {
-			log.Printf("警告: クローズに失敗しました (%s): %v", path, err)
-		}
+			fmt.Printf("--- 読み込み元: %s ---\n%s\n", p, string(content))
+		}(path)
 	}
 }
 ```

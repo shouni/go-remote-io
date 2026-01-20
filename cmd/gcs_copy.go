@@ -70,6 +70,12 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
+			slog.Info("データ転送開始",
+				slog.String("input", inputPath),
+				slog.String("output", outputPath),
+				slog.String("type", "GCS"),
+			)
+
 			if err := writer.Write(ctx, outputPath, rc, ""); err != nil {
 				return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
 			}

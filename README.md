@@ -78,8 +78,18 @@ func main() {
 			log.Printf("読み込み失敗 (%s): %v", path, err)
 			continue
 		}
-		content, _ := io.ReadAll(rc)
-		_ = rc.Close()
+		// Open成功後すぐにdeferでCloseをスケジュールする
+		defer func() {
+			if err := rc.Close(); err != nil {
+				log.Printf("警告: クローズに失敗しました (%s): %v", path, err)
+			}
+		}()
+
+		content, err := io.ReadAll(rc)
+		if err != nil {
+			log.Printf("コンテンツの読み込みに失敗しました (%s): %v", path, err)
+			continue
+		}
 
 		fmt.Printf("--- 読み込み元: %s ---\n%s\n", path, string(content))
 	}

@@ -78,20 +78,23 @@ func main() {
 			log.Printf("読み込み失敗 (%s): %v", path, err)
 			continue
 		}
-		// Open成功後すぐにdeferでCloseをスケジュールする
-		defer func() {
-			if err := rc.Close(); err != nil {
-				log.Printf("警告: クローズに失敗しました (%s): %v", path, err)
-			}
-		}()
 
 		content, err := io.ReadAll(rc)
 		if err != nil {
 			log.Printf("コンテンツの読み込みに失敗しました (%s): %v", path, err)
+			// エラーが発生した場合でも、リソースのクローズを試みる
+			if closeErr := rc.Close(); closeErr != nil {
+				log.Printf("警告: クローズに失敗しました (%s): %v", path, closeErr)
+			}
 			continue
 		}
 
 		fmt.Printf("--- 読み込み元: %s ---\n%s\n", path, string(content))
+
+		// 処理が正常に完了した後にリソースをクローズする
+		if err := rc.Close(); err != nil {
+			log.Printf("警告: クローズに失敗しました (%s): %v", path, err)
+		}
 	}
 }
 ```

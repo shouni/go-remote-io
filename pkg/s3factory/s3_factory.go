@@ -38,6 +38,7 @@ func New(ctx context.Context) (remoteio.IOFactory, error) {
 	}, nil
 }
 
+// Close インターフェース要件に準拠するために実装されたno-opメソッドです。
 func (f *S3ClientFactory) Close() error {
 	// aws-sdk-go-v2 の s3.Client は基本的に Close 不要。
 	// インターフェース統一のため no-op で実装する。
@@ -47,7 +48,7 @@ func (f *S3ClientFactory) Close() error {
 // InputReader は、S3クライアントのみを注入した InputReader を生成します。
 // GCSクライアントはnilを渡します。
 func (f *S3ClientFactory) InputReader() (remoteio.InputReader, error) {
-	s3Client, err := f.GetS3Client()
+	s3Client, err := f.getS3Client()
 	if err != nil {
 		return nil, fmt.Errorf("InputReaderを生成できません: S3クライアントの初期化に失敗しました")
 	}
@@ -56,10 +57,10 @@ func (f *S3ClientFactory) InputReader() (remoteio.InputReader, error) {
 	return remoteio.NewUniversalInputReader(nil, s3Client), nil
 }
 
-// NewOutputWriter は、S3クライアントのみを注入した OutputWriter を生成します。
+// OutputWriter は、S3クライアントのみを注入した OutputWriter を生成します。
 // GCSクライアントはnilを渡します。
 func (f *S3ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	s3Client, err := f.GetS3Client()
+	s3Client, err := f.getS3Client()
 	if err != nil {
 		return nil, fmt.Errorf("OutputWriterを生成できません: S3クライアントの初期化に失敗しました")
 	}
@@ -70,7 +71,7 @@ func (f *S3ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
 
 // URLSigner は、S3クライアントを注入した URLSigner の具象実装を返します。
 func (f *S3ClientFactory) URLSigner() (remoteio.URLSigner, error) {
-	client, err := f.GetS3Client()
+	client, err := f.getS3Client()
 	if err != nil {
 		return nil, fmt.Errorf("S3 URLSignerを生成できません: %w", err)
 	}
@@ -78,8 +79,8 @@ func (f *S3ClientFactory) URLSigner() (remoteio.URLSigner, error) {
 	return remoteio.NewS3URLSigner(client), nil
 }
 
-// GetS3Client は、ファクトリが保持するS3クライアントを返します。
-func (f *S3ClientFactory) GetS3Client() (*s3.Client, error) {
+// getS3Client は、ファクトリが保持するS3クライアントを返します。
+func (f *S3ClientFactory) getS3Client() (*s3.Client, error) {
 	if f.s3Client == nil {
 		return nil, fmt.Errorf("S3クライアントは初期化に失敗しています")
 	}

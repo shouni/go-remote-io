@@ -83,8 +83,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
-			// WriteToLocalにrcを渡して書き込みを実行
-			if err := writer.WriteToLocal(ctx, outputPath, rc); err != nil {
+			if err := writer.Write(ctx, outputPath, rc, ""); err != nil {
 				return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
 			}
 

@@ -30,7 +30,6 @@ type InputReader interface {
 type OutputWriter interface {
 	// Write は、URIのプレフィックスに応じてGCS、S3、またはローカルファイルパスへデータを書き込みます。
 	Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error
-	WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error
 }
 
 // URLSigner は、リモートストレージの署名付きURLを生成する機能を提供します。

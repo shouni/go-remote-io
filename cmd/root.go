@@ -9,6 +9,7 @@ import (
 	"time"
 
 	clibase "github.com/shouni/go-cli-base"
+	"github.com/shouni/go-remote-io/pkg/remoteio"
 	"github.com/spf13/cobra"
 
 	"github.com/shouni/go-remote-io/pkg/gcsfactory"
@@ -45,12 +46,12 @@ type gcsFactoryCloserKey struct{}
 // =================================================================
 
 // GetFactoryFromContext は、cmd.Context() から gcsfactory.Factory (GCS専用) を取り出します。
-func GetFactoryFromContext(ctx context.Context) (gcsfactory.Factory, error) {
+func GetFactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 	val := ctx.Value(gcsFactoryKey{})
 	if val == nil {
 		return nil, fmt.Errorf("コンテキストにGCSファクトリが見つかりません。")
 	}
-	f, ok := val.(gcsfactory.Factory)
+	f, ok := val.(remoteio.IOFactory)
 	if !ok {
 		return nil, fmt.Errorf("コンテキストの値が期待される型 (factory.Factory) ではありません。")
 	}
@@ -58,12 +59,12 @@ func GetFactoryFromContext(ctx context.Context) (gcsfactory.Factory, error) {
 }
 
 // GetS3FactoryFromContext は、cmd.Context() から s3factory.Factory (S3専用) を取り出します。
-func GetS3FactoryFromContext(ctx context.Context) (s3factory.Factory, error) {
+func GetS3FactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 	val := ctx.Value(s3FactoryKey{})
 	if val == nil {
 		return nil, fmt.Errorf("コンテキストにS3ファクトリが見つかりません。")
 	}
-	f, ok := val.(s3factory.Factory)
+	f, ok := val.(remoteio.IOFactory)
 	if !ok {
 		return nil, fmt.Errorf("コンテキストの値が期待される型 (s3factory.Factory) ではありません。")
 	}
@@ -96,11 +97,9 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	newCtx := ctx
-	var gcsFactory gcsfactory.Factory
-	var s3Factory s3factory.Factory
 
 	// 1. GCS Factory の初期化 (GCS Client)
-	gcsFactory, gcsErr := gcsfactory.NewGCSClientFactory(initCtx)
+	gcsFactory, gcsErr := gcsfactory.New(initCtx)
 	if gcsErr == nil {
 		// コンテキストに GCS Factory を格納
 		newCtx = context.WithValue(newCtx, gcsFactoryKey{}, gcsFactory)
@@ -115,7 +114,7 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. S3 Factory の初期化 (S3 Client)
-	s3Factory, s3Err := s3factory.NewS3ClientFactory(initCtx)
+	s3Factory, s3Err := s3factory.New(initCtx)
 	if s3Err == nil {
 		// コンテキストに S3 Factory を格納
 		newCtx = context.WithValue(newCtx, s3FactoryKey{}, s3Factory)

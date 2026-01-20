@@ -16,37 +16,6 @@ import (
 const DefaultContentType = "text/plain; charset=utf-8"
 
 // =================================================================
-// 1. インターフェース定義
-// =================================================================
-
-// OutputWriter は、GCS、S3、およびローカルファイルシステムへの書き込みを抽象化する汎用インターフェースです。
-type OutputWriter interface {
-	// Write は、URIのプレフィックスに応じてGCS、S3、またはローカルファイルパスへデータを書き込みます。
-	Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error
-	GCSOutputWriter
-	S3OutputWriter
-	LocalOutputWriter
-}
-
-// GCSOutputWriter は、Google Cloud Storage (GCS) にコンテンツをストリーミング書き込みするためのインターフェースです。
-type GCSOutputWriter interface {
-	// WriteToGCS は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツをストリーミング書き込みします。
-	WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
-}
-
-// S3OutputWriter は、Amazon Simple Storage Service (S3) にコンテンツを書き込むためのインターフェースです。
-type S3OutputWriter interface {
-	// WriteToS3 は、指定されたバケットとオブジェクトパスに io.Reader からコンテンツを書き込みます。
-	WriteToS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error
-}
-
-// LocalOutputWriter は、ローカルファイルシステムにコンテンツを書き込むためのインターフェースです。
-type LocalOutputWriter interface {
-	// WriteToLocal は、指定されたローカルパスに io.Reader からコンテンツを書き込みます。必要に応じてディレクトリを作成します。
-	WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error
-}
-
-// =================================================================
 // 2. 具象構造体とコンストラクタ (UniversalIOWriterへ統合)
 // =================================================================
 
@@ -63,7 +32,7 @@ func NewUniversalIOWriter(gcsClient *storage.Client, s3Client *s3.Client) *Unive
 }
 
 // =================================================================
-// 3. コアロジック (実装)
+// コアロジック (実装)
 // =================================================================
 
 // Write は OutputWriter インターフェースの汎用メソッドを実装します。
@@ -199,12 +168,3 @@ func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, conte
 	slog.Info("ローカル書き込み処理完了", slog.String("path", path))
 	return nil
 }
-
-// =================================================================
-// 4. 型アサーションチェック
-// =================================================================
-
-var _ OutputWriter = (*UniversalIOWriter)(nil)    // UniversalIOWriterがOutputWriterインターフェースを満たしていることを確認
-var _ GCSOutputWriter = (*UniversalIOWriter)(nil) // UniversalIOWriterがGCSOutputWriterインターフェースを満たしていることを確認
-var _ S3OutputWriter = (*UniversalIOWriter)(nil)
-var _ LocalOutputWriter = (*UniversalIOWriter)(nil)

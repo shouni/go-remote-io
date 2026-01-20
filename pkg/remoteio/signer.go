@@ -12,16 +12,7 @@ import (
 )
 
 // =================================================================
-// 1. インターフェース定義
-// =================================================================
-
-// URLSigner は、リモートストレージの署名付きURLを生成する機能を提供します。
-type URLSigner interface {
-	GenerateSignedURL(ctx context.Context, uri string, method string, expires time.Duration) (string, error)
-}
-
-// =================================================================
-// 2. GCS URLSigner の実装
+// GCS URLSigner の実装
 // =================================================================
 
 type gcsURLSigner struct {
@@ -57,7 +48,7 @@ func (s *gcsURLSigner) GenerateSignedURL(ctx context.Context, uri string, method
 }
 
 // =================================================================
-// 3. S3 URLSigner の実装
+// S3 URLSigner の実装
 // =================================================================
 
 type s3URLSigner struct {

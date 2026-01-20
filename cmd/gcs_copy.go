@@ -49,7 +49,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 	}
 
 	// 3. InputReader の取得
-	inputReader, err := gcsFactory.NewInputReader()
+	inputReader, err := gcsFactory.InputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
@@ -65,30 +65,12 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 	if outputPath != "" {
 		if remoteio.IsGCSURI(outputPath) {
 			// GCS URIが指定された場合
-			writer, err := gcsFactory.NewOutputWriter()
+			writer, err := gcsFactory.OutputWriter()
 			if err != nil {
 				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
-			// writerがGCSOutputWriterインターフェースを満たすかチェック
-			gcsWriter, ok := writer.(remoteio.GCSOutputWriter)
-			if !ok {
-				return fmt.Errorf("FactoryがGCS出力用のWriterインターフェース(remoteio.GCSOutputWriter)を提供していません")
-			}
-
-			// URIをバケット名とオブジェクトパスにパース
-			bucket, object, err := remoteio.ParseGCSURI(outputPath)
-			if err != nil {
-				return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
-			}
-
-			slog.Info("データ転送開始",
-				slog.String("input", inputPath),
-				slog.String("output", outputPath),
-				slog.String("type", "GCS"),
-			)
-
-			if err := gcsWriter.WriteToGCS(ctx, bucket, object, rc, ""); err != nil {
+			if err := writer.Write(ctx, outputPath, rc, ""); err != nil {
 				return fmt.Errorf("GCSへのコンテンツ書き込みに失敗しました: %w", err)
 			}
 
@@ -96,25 +78,13 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 
 		} else {
 			// ローカルファイルが指定された場合
-			writer, err := gcsFactory.NewOutputWriter()
+			writer, err := gcsFactory.OutputWriter()
 			if err != nil {
 				return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 			}
 
-			// writerがLocalOutputWriterインターフェースを満たすかチェック
-			localWriter, ok := writer.(remoteio.LocalOutputWriter)
-			if !ok {
-				return fmt.Errorf("Factoryがローカルファイル出力用のWriterインターフェース(remoteio.LocalOutputWriter)を提供していません")
-			}
-
-			slog.Info("データ転送開始",
-				slog.String("input", inputPath),
-				slog.String("output", outputPath),
-				slog.String("type", "LocalFile"),
-			)
-
 			// WriteToLocalにrcを渡して書き込みを実行
-			if err := localWriter.WriteToLocal(ctx, outputPath, rc); err != nil {
+			if err := writer.WriteToLocal(ctx, outputPath, rc); err != nil {
 				return fmt.Errorf("ローカルファイルへの書き込みに失敗しました: %w", err)
 			}
 

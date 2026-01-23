@@ -133,7 +133,7 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 			slog.Info("S3 Factoryを初期化しました。")
 		}
 	} else if verbose {
-		slog.Warn("S3 Factory의初期化に失敗しました。", "error", s3Err)
+		slog.Warn("S3 Factoryの初期化に失敗しました。", "error", s3Err)
 	}
 
 	if gcsErr != nil && s3Err != nil {

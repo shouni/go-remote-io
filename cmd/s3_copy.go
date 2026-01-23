@@ -40,7 +40,7 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 	outputPath := s3Flags.OutputFilename
 	verbose := clibase.GetConfig().Verbose
 
-	// 1. GCS URIチェック (早期リターン)
+	// 1. GCS URIチェック
 	if remoteio.IsGCSURI(inputPath) || (outputPath != "" && remoteio.IsGCSURI(outputPath)) {
 		return fmt.Errorf("このコマンドはGCS URI (gs://) をサポートしていません。gcs-copy コマンドを使用してください。")
 	}
@@ -65,13 +65,11 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 
 	// 4. データ転送の実行
 	if outputPath != "" {
-		// 出力先が指定されている場合
 		writer, err := s3Factory.OutputWriter()
 		if err != nil {
 			return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 		}
 
-		// ContentTypeの決定
 		contentType := s3Flags.ContentType
 		if contentType == "" && remoteio.IsS3URI(outputPath) {
 			contentType = remoteio.DefaultContentType
@@ -89,7 +87,11 @@ func runS3Copy(cmd *cobra.Command, args []string) error {
 		}
 
 		if err := writer.Write(ctx, outputPath, rc, contentType); err != nil {
-			return fmt.Errorf("出力先への書き込みに失敗しました (%s): %w", outputPath, err)
+			targetType := "ローカルファイル"
+			if remoteio.IsS3URI(outputPath) {
+				targetType = "S3"
+			}
+			return fmt.Errorf("%sへの書き込みに失敗しました (%s): %w", targetType, outputPath, err)
 		}
 	} else {
 		// 標準出力に出力する場合

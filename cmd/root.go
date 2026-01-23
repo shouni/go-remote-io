@@ -37,7 +37,6 @@ var appFlags AppFlags
 // 2. Factoryの取得ヘルパー関数
 // =================================================================
 
-// getFactoryFromContext は内部的な共通取得ロジックです。
 func getFactoryFromContext(ctx context.Context, key any, name string) (remoteio.IOFactory, error) {
 	if val, ok := ctx.Value(key).(remoteio.IOFactory); ok && val != nil {
 		return val, nil
@@ -45,12 +44,10 @@ func getFactoryFromContext(ctx context.Context, key any, name string) (remoteio.
 	return nil, fmt.Errorf("コンテキストに%sファクトリが見つかりません。", name)
 }
 
-// GetGCSFactoryFromContext はコンテキストから GCS ファクトリを取得します。
 func GetGCSFactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 	return getFactoryFromContext(ctx, gcsFactoryKey{}, "GCS")
 }
 
-// GetS3FactoryFromContext はコンテキストから S3 ファクトリを取得します。
 func GetS3FactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 	return getFactoryFromContext(ctx, s3FactoryKey{}, "S3")
 }
@@ -89,9 +86,9 @@ func cleanupResources(ctx context.Context) {
 	for _, t := range targets {
 		if closer, ok := ctx.Value(t.key).(io.Closer); ok && closer != nil {
 			if err := closer.Close(); err != nil {
-				slog.Warn("クライアントのクローズに失敗しました", "client", t.name, "error", err)
+				slog.Warn("クライアントのクローズに失敗しました。", "client", t.name, "error", err)
 			} else if verbose {
-				slog.Info("クライアントをクローズしました。", "client", t.name)
+				slog.Info("クライアントを正常にクローズしました。", "client", t.name)
 			}
 		}
 	}
@@ -136,12 +133,11 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 			slog.Info("S3 Factoryを初期化しました。")
 		}
 	} else if verbose {
-		slog.Warn("S3 Factoryの初期化に失敗しました。", "error", s3Err)
+		slog.Warn("S3 Factory의初期化に失敗しました。", "error", s3Err)
 	}
 
 	if gcsErr != nil && s3Err != nil {
-		joinedErr := errors.Join(gcsErr, s3Err)
-		return fmt.Errorf("GCS/S3 両方の初期化に失敗しました: %w", joinedErr)
+		return fmt.Errorf("必須クライアントの初期化に失敗しました: %w", errors.Join(gcsErr, s3Err))
 	}
 
 	cmd.SetContext(newCtx)

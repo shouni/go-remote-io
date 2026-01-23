@@ -43,7 +43,7 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("このコマンドはS3 URI (s3://) をサポートしていません。s3-copy コマンドを使用してください。")
 	}
 
-	// 2. GCS専用Factoryの取得 (修正済み: 名前変更に対応)
+	// 2. GCS専用Factoryの取得
 	gcsFactory, err := GetGCSFactoryFromContext(ctx)
 	if err != nil {
 		return err
@@ -77,9 +77,13 @@ func runGCSCopy(cmd *cobra.Command, args []string) error {
 			)
 		}
 
-		// OutputWriter.Write は内部でローカル/GCSの判定を行うため、条件分岐を整理
+		// 修正済み: エラーメッセージに書き込み先の種別（GCS or ローカルファイル）を含める
 		if err := writer.Write(ctx, outputPath, rc, ""); err != nil {
-			return fmt.Errorf("出力先への書き込みに失敗しました (%s): %w", outputPath, err)
+			targetType := "ローカルファイル"
+			if remoteio.IsGCSURI(outputPath) {
+				targetType = "GCS"
+			}
+			return fmt.Errorf("%sへの書き込みに失敗しました (%s): %w", targetType, outputPath, err)
 		}
 	} else {
 		// 標準出力に出力する場合

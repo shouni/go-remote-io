@@ -20,12 +20,11 @@ const (
 )
 
 // =================================================================
-// 1. グローバル変数とコンテキストキーの定義
+// 1. コンテキストキーの定義
 // =================================================================
 
 type gcsFactoryKey struct{}
 type s3FactoryKey struct{}
-type gcsFactoryCloserKey struct{}
 
 type AppFlags struct {
 	TimeoutSec int
@@ -56,30 +55,38 @@ func GetS3FactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 // =================================================================
 
 func Execute() {
-	// クリーンアップ用の参照を保持するための変数を定義
-	var cleanupCtx context.Context
-
 	clibase.Execute(clibase.App{
 		Name:     appName,
 		AddFlags: addAppPersistentFlags,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initPersistentPreRunE(cmd, args)
-			cleanupCtx = cmd.Context() // クリーンアップ用に更新されたContextを保存
-			return err
+		PreRunE:  initPersistentPreRunE,
+		PostRun: func(cmd *cobra.Command, args []string) {
+			cleanupResources(cmd.Context())
 		},
+
 		Commands: []*cobra.Command{
 			gcsCopyCmd,
 			s3CopyCmd,
 		},
 	})
+}
 
-	// リソースクリーンアップ (Executeが終了した後に実行)
-	if cleanupCtx != nil {
-		if closer, ok := cleanupCtx.Value(gcsFactoryCloserKey{}).(io.Closer); ok && closer != nil {
+// cleanupResources はコンテキスト内の Factory が io.Closer を実装していればクローズします
+func cleanupResources(ctx context.Context) {
+	verbose := clibase.GetConfig().Verbose
+	targets := []struct {
+		key  any
+		name string
+	}{
+		{gcsFactoryKey{}, "GCS"},
+		{s3FactoryKey{}, "S3"},
+	}
+
+	for _, t := range targets {
+		if closer, ok := ctx.Value(t.key).(io.Closer); ok && closer != nil {
 			if err := closer.Close(); err != nil {
-				slog.Warn("GCSクライアントのクローズに失敗しました", slog.Any("error", err))
-			} else if clibase.GetConfig().Verbose {
-				slog.Info("GCSクライアントをクローズしました。")
+				slog.Warn(fmt.Sprintf("%sクライアントのクローズに失敗しました", t.name), slog.Any("error", err))
+			} else if verbose {
+				slog.Info(fmt.Sprintf("%sクライアントをクローズしました。", t.name))
 			}
 		}
 	}
@@ -105,12 +112,11 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	gcsFactory, gcsErr := gcsfactory.New(initCtx)
 	if gcsErr == nil {
 		newCtx = context.WithValue(newCtx, gcsFactoryKey{}, gcsFactory)
-		newCtx = context.WithValue(newCtx, gcsFactoryCloserKey{}, io.Closer(gcsFactory))
 		if verbose {
-			slog.Info("GCS Factoryを初期化しました。", slog.String("client_type", "GCS"))
+			slog.Info("GCS Factoryを初期化しました。")
 		}
 	} else if verbose {
-		slog.Warn("GCS Factoryの初期化をスキップしました。", slog.String("error", gcsErr.Error()))
+		slog.Warn("GCS Factoryの初期化をスキップしました。", slog.Any("error", gcsErr))
 	}
 
 	// 2. S3 Factory の初期化
@@ -118,14 +124,15 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	if s3Err == nil {
 		newCtx = context.WithValue(newCtx, s3FactoryKey{}, s3Factory)
 		if verbose {
-			slog.Info("S3 Factoryを初期化しました。", slog.String("client_type", "S3"))
+			slog.Info("S3 Factoryを初期化しました。")
 		}
 	} else if verbose {
-		slog.Warn("S3 Factoryの初期化をスキップしました。", slog.String("error", s3Err.Error()))
+		slog.Warn("S3 Factoryの初期化をスキップしました。", slog.Any("error", s3Err))
 	}
 
+	// 両方失敗した場合のみエラー
 	if gcsErr != nil && s3Err != nil {
-		return fmt.Errorf("GCSファクトリとS3ファクトリの両方の初期化に失敗しました: GCS: %v, S3: %v", gcsErr, s3Err)
+		return fmt.Errorf("GCS/S3 両方の初期化に失敗しました: GCS: %v, S3: %v", gcsErr, s3Err)
 	}
 
 	cmd.SetContext(newCtx)

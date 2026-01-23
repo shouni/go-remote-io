@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -36,18 +37,20 @@ var appFlags AppFlags
 // 2. Factoryの取得ヘルパー関数
 // =================================================================
 
-func GetFactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
-	if val, ok := ctx.Value(gcsFactoryKey{}).(remoteio.IOFactory); ok {
+// getFactoryFromContext は内部的な共通取得ロジックです。
+func getFactoryFromContext(ctx context.Context, key any, name string) (remoteio.IOFactory, error) {
+	if val, ok := ctx.Value(key).(remoteio.IOFactory); ok && val != nil {
 		return val, nil
 	}
-	return nil, fmt.Errorf("コンテキストにGCSファクトリが見つかりません。")
+	return nil, fmt.Errorf("コンテキストに%sファクトリが見つかりません。", name)
+}
+
+func GetFactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
+	return getFactoryFromContext(ctx, gcsFactoryKey{}, "GCS")
 }
 
 func GetS3FactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
-	if val, ok := ctx.Value(s3FactoryKey{}).(remoteio.IOFactory); ok {
-		return val, nil
-	}
-	return nil, fmt.Errorf("コンテキストにS3ファクトリが見つかりません。")
+	return getFactoryFromContext(ctx, s3FactoryKey{}, "S3")
 }
 
 // =================================================================
@@ -62,7 +65,6 @@ func Execute() {
 		PostRun: func(cmd *cobra.Command, args []string) {
 			cleanupResources(cmd.Context())
 		},
-
 		Commands: []*cobra.Command{
 			gcsCopyCmd,
 			s3CopyCmd,
@@ -70,9 +72,10 @@ func Execute() {
 	})
 }
 
-// cleanupResources はコンテキスト内の Factory が io.Closer を実装していればクローズします
+// cleanupResources はリソースを解放します
 func cleanupResources(ctx context.Context) {
 	verbose := clibase.GetConfig().Verbose
+
 	targets := []struct {
 		key  any
 		name string
@@ -84,9 +87,9 @@ func cleanupResources(ctx context.Context) {
 	for _, t := range targets {
 		if closer, ok := ctx.Value(t.key).(io.Closer); ok && closer != nil {
 			if err := closer.Close(); err != nil {
-				slog.Warn(fmt.Sprintf("%sクライアントのクローズに失敗しました", t.name), slog.Any("error", err))
+				slog.Warn("クライアントのクローズに失敗しました", "client", t.name, "error", err)
 			} else if verbose {
-				slog.Info(fmt.Sprintf("%sクライアントをクローズしました。", t.name))
+				slog.Info("クライアントをクローズしました。", "client", t.name)
 			}
 		}
 	}
@@ -108,31 +111,31 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	newCtx := ctx
 	verbose := clibase.GetConfig().Verbose
 
+	var gcsErr, s3Err error
+
 	// 1. GCS Factory の初期化
-	gcsFactory, gcsErr := gcsfactory.New(initCtx)
+	var gcsFactory remoteio.IOFactory
+	gcsFactory, gcsErr = gcsfactory.New(initCtx)
 	if gcsErr == nil {
 		newCtx = context.WithValue(newCtx, gcsFactoryKey{}, gcsFactory)
 		if verbose {
 			slog.Info("GCS Factoryを初期化しました。")
 		}
-	} else if verbose {
-		slog.Warn("GCS Factoryの初期化をスキップしました。", slog.Any("error", gcsErr))
 	}
 
 	// 2. S3 Factory の初期化
-	s3Factory, s3Err := s3factory.New(initCtx)
+	var s3Factory remoteio.IOFactory
+	s3Factory, s3Err = s3factory.New(initCtx)
 	if s3Err == nil {
 		newCtx = context.WithValue(newCtx, s3FactoryKey{}, s3Factory)
 		if verbose {
 			slog.Info("S3 Factoryを初期化しました。")
 		}
-	} else if verbose {
-		slog.Warn("S3 Factoryの初期化をスキップしました。", slog.Any("error", s3Err))
 	}
 
-	// 両方失敗した場合のみエラー
 	if gcsErr != nil && s3Err != nil {
-		return fmt.Errorf("GCS/S3 両方の初期化に失敗しました: GCS: %v, S3: %v", gcsErr, s3Err)
+		joinedErr := errors.Join(gcsErr, s3Err)
+		return fmt.Errorf("GCS/S3 両方の初期化に失敗しました: %w", joinedErr)
 	}
 
 	cmd.SetContext(newCtx)

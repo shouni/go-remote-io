@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/shouni/clibase"
 	"github.com/shouni/go-remote-io/pkg/remoteio"
 	"github.com/spf13/cobra"
 )
@@ -16,16 +17,12 @@ type s3CopyFlags struct {
 	ContentType    string // -t, --content-type S3に書き込む際のMIMEタイプ
 }
 
-var s3Flags s3CopyFlags // s3CopyCmd 専用のフラグ変数
-
-// =================================================================
-// コマンド実装
-// =================================================================
+var s3Flags s3CopyFlags
 
 // s3CopyCmd は 's3-copy' サブコマンドを定義します。
 var s3CopyCmd = &cobra.Command{
 	Use:   "s3-copy [source_path]",
-	Short: "S3/ローカルパス間で内容を読み込み、指定された S3/ローカルパスへ転送します。",
+	Short: "S3/ローカルパス間で内容を読み込み、指定された場所へ転送します。",
 	Long: `S3 URI (s3://) またはローカルファイルパスを扱います。
 このコマンドは S3専用ファクトリに依存し、GCS URIはサポートしません。`,
 	Args: cobra.ExactArgs(1),
@@ -33,69 +30,80 @@ var s3CopyCmd = &cobra.Command{
 }
 
 func init() {
-	// 固有のフラグ変数 s3Flags を使用するように修正
 	s3CopyCmd.Flags().StringVarP(&s3Flags.OutputFilename, "output", "o", "", "読み込んだ内容を書き出すファイル名（省略時は標準出力）")
 	s3CopyCmd.Flags().StringVarP(&s3Flags.ContentType, "content-type", "t", "", "S3に書き込む際のMIMEタイプ（例: text/plain; charset=utf-8）")
 }
 
-// runS3Copy は s3-copy コマンドの実行ロジックです。
 func runS3Copy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	inputPath := args[0]
+	outputPath := s3Flags.OutputFilename
+	verbose := clibase.GetConfig().Verbose
 
-	// 1. S3専用 Factory の取得 (GetS3FactoryFromContext は root.go に定義されている前提)
+	// 1. GCS URIチェック (早期リターン)
+	if remoteio.IsGCSURI(inputPath) || (outputPath != "" && remoteio.IsGCSURI(outputPath)) {
+		return fmt.Errorf("このコマンドはGCS URI (gs://) をサポートしていません。gcs-copy コマンドを使用してください。")
+	}
+
+	// 2. S3専用 Factory の取得
 	s3Factory, err := GetS3FactoryFromContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 2. InputReader の取得
+	// 3. 読み込みストリームのオープン
 	inputReader, err := s3Factory.InputReader()
 	if err != nil {
 		return fmt.Errorf("InputReaderの作成に失敗しました: %w", err)
 	}
 
-	// 3. 読み込みストリームのオープン
 	rc, err := inputReader.Open(ctx, inputPath)
 	if err != nil {
 		return fmt.Errorf("入力ストリームのオープンに失敗しました (%s): %w", inputPath, err)
 	}
 	defer rc.Close()
 
-	// 4. 出力先の決定とデータの転送
-	outputPath := s3Flags.OutputFilename
-
-	if outputPath == "" {
-		// 標準出力に出力する場合 (ロジック変更なし)
-		slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", "stdout"), slog.String("type", "Stdout"))
-		if _, err := io.Copy(os.Stdout, rc); err != nil {
-			return fmt.Errorf("データの転送中にエラーが発生しました: %w", err)
+	// 4. データ転送の実行
+	if outputPath != "" {
+		// 出力先が指定されている場合
+		writer, err := s3Factory.OutputWriter()
+		if err != nil {
+			return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
 		}
-		return nil
-	}
 
-	// GCS URIチェック (ロジック変更なし)
-	if remoteio.IsGCSURI(inputPath) || remoteio.IsGCSURI(outputPath) {
-		return fmt.Errorf("このコマンドはGCS URI (gs://) をサポートしていません。gcs-copy コマンドを使用してください。")
-	}
+		// ContentTypeの決定
+		contentType := s3Flags.ContentType
+		if contentType == "" && remoteio.IsS3URI(outputPath) {
+			contentType = remoteio.DefaultContentType
+			if verbose {
+				slog.Debug("Content-Typeが未指定のため、デフォルト値を適用", "content_type", contentType)
+			}
+		}
 
-	writer, err := s3Factory.OutputWriter()
-	if err != nil {
-		return fmt.Errorf("OutputWriterの作成に失敗しました: %w", err)
-	}
+		if verbose {
+			slog.Info("データ転送開始",
+				"input", inputPath,
+				"output", outputPath,
+				"mode", "file",
+			)
+		}
 
-	// ContentTypeの決定
-	contentType := s3Flags.ContentType
-	if contentType == "" && remoteio.IsS3URI(outputPath) {
-		// S3 URIへの書き込みでContent-Typeが指定されていない場合、デフォルトを適用
-		contentType = remoteio.DefaultContentType
-		slog.Debug("Content-Typeが未指定のため、デフォルト値を適用", slog.String("content_type", contentType))
-	}
+		if err := writer.Write(ctx, outputPath, rc, contentType); err != nil {
+			return fmt.Errorf("出力先への書き込みに失敗しました (%s): %w", outputPath, err)
+		}
+	} else {
+		// 標準出力に出力する場合
+		if verbose {
+			slog.Info("データ転送開始",
+				"input", inputPath,
+				"output", "stdout",
+				"mode", "stream",
+			)
+		}
 
-	// OutputWriter の実装が S3 URIの場合は S3へ、その他はローカルに書き込みます。
-	slog.Info("データ転送開始", slog.String("input", inputPath), slog.String("output", outputPath))
-	if err := writer.Write(ctx, outputPath, rc, contentType); err != nil {
-		return fmt.Errorf("'%s' への書き込みに失敗しました: %w", outputPath, err)
+		if _, err := io.Copy(os.Stdout, rc); err != nil {
+			return fmt.Errorf("標準出力への転送中にエラーが発生しました: %w", err)
+		}
 	}
 
 	return nil

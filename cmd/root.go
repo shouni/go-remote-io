@@ -45,10 +45,12 @@ func getFactoryFromContext(ctx context.Context, key any, name string) (remoteio.
 	return nil, fmt.Errorf("コンテキストに%sファクトリが見つかりません。", name)
 }
 
-func GetFactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
+// GetGCSFactoryFromContext はコンテキストから GCS ファクトリを取得します。
+func GetGCSFactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 	return getFactoryFromContext(ctx, gcsFactoryKey{}, "GCS")
 }
 
+// GetS3FactoryFromContext はコンテキストから S3 ファクトリを取得します。
 func GetS3FactoryFromContext(ctx context.Context) (remoteio.IOFactory, error) {
 	return getFactoryFromContext(ctx, s3FactoryKey{}, "S3")
 }
@@ -72,7 +74,7 @@ func Execute() {
 	})
 }
 
-// cleanupResources はリソースを解放します
+// cleanupResources はリソースを解放します。
 func cleanupResources(ctx context.Context) {
 	verbose := clibase.GetConfig().Verbose
 
@@ -121,6 +123,8 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 		if verbose {
 			slog.Info("GCS Factoryを初期化しました。")
 		}
+	} else if verbose {
+		slog.Warn("GCS Factoryの初期化に失敗しました。", "error", gcsErr)
 	}
 
 	// 2. S3 Factory の初期化
@@ -131,6 +135,8 @@ func initPersistentPreRunE(cmd *cobra.Command, args []string) error {
 		if verbose {
 			slog.Info("S3 Factoryを初期化しました。")
 		}
+	} else if verbose {
+		slog.Warn("S3 Factoryの初期化に失敗しました。", "error", s3Err)
 	}
 
 	if gcsErr != nil && s3Err != nil {

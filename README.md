@@ -5,7 +5,7 @@
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/go-remote-io)](https://github.com/shouni/go-remote-io/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 🚀 概要 (About) - マルチクラウド・ストレージを、ひとつのインターフェースで。
+## 🚀 概要 (About) - 両翼を統べる、透過的マルチクラウドインターフェース
 
 Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**ローカルファイルシステム**を透過的に扱うための抽象化 I/O ライブラリです。
 

@@ -7,8 +7,7 @@
 # macOS
 .DS_Store
 
-# Go Modules Cache
-# ビルド時に生成されるキャッシュやバイナリ
+# Go build artifacts
 *.exe
 *.dll
 *.so
@@ -16,4 +15,16 @@
 *.a
 /bin/
 
-*.env
+# Environment files
+# Ignore all .env files but keep templates
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# VSCode editor
+.vscode/
+
+# Go test coverage
+/coverage.out
+/coverage.html

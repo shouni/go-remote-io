@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/storage"
-	"github.com/shouni/go-remote-io/pkg/remoteio"
+	"github.com/shouni/go-remote-io/remoteio"
 )
 
 // Factory インターフェースの定義

@@ -28,17 +28,17 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**�
 ## 📐 ライブラリ構成
 
 ```text
-go-remote-io/
-├── remoteio/                 # I/Oの核となる機能（インターフェース + Universal実装）
-│   ├── interfaces.go         # InputReader / OutputWriter / URLSigner 等の定義
-│   ├── reader.go             # UniversalInputReader (GCS/S3/Local の振分け)
-│   ├── writer.go             # UniversalIOWriter (GCS/S3/Local への書き込み)
-│   ├── signer.go             # URLSigner 実装 (URIに応じた署名URL生成)
-│   └── util.go               # URI判定・解析 (IsRemoteURI / ParseGCSURI 等)
-├── gcsfactory/               # GCS専用Factory
-│   └── factory.go            # GCSクライアントの初期化・コンポーネント提供
-└── s3factory/                # S3専用Factory
-    └── factory.go            # S3クライアントの初期化・コンポーネント提供
+go-remote-io
+└── remoteio/             # I/Oの核となる機能（インターフェース + Universal実装）
+    ├── gcs/              # GCS専用実装
+    │   └── factory.go    # GCSクライアントの初期化・提供
+    ├── s3/               # S3専用実装
+    │   └── factory.go    # S3クライアントの初期化・提供
+    ├── interfaces.go     # IOFactory / InputReader / OutputWriter の定義
+    ├── reader.go         # UniversalInputReader (GCS/S3/Local を透過的に読み込み)
+    ├── writer.go         # UniversalIOWriter (書き込み処理)
+    ├── signer.go         # URLSigner (署名付きURL生成)
+    └── util.go           # URI判定・解析（IsGCSURI / IsS3URI 等）
 ```
 
 ### 🛠️ 主要な依存関係 (Dependencies)

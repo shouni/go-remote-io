@@ -1,4 +1,4 @@
-package gcsfactory
+package gcs
 
 import (
 	"context"

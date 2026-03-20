@@ -36,9 +36,9 @@ go-remote-io/
 │   ├── signer.go             # URLSigner 実装 (URIに応じた署名URL生成)
 │   └── util.go               # URI判定・解析 (IsRemoteURI / ParseGCSURI 等)
 ├── gcsfactory/               # GCS専用Factory
-│   └── gcs_factory.go        # GCSクライアントの初期化・コンポーネント提供
+│   └── factory.go            # GCSクライアントの初期化・コンポーネント提供
 └── s3factory/                # S3専用Factory
-    └── s3_factory.go         # S3クライアントの初期化・コンポーネント提供
+    └── factory.go            # S3クライアントの初期化・コンポーネント提供
 ```
 
 ### 🛠️ 主要な依存関係 (Dependencies)

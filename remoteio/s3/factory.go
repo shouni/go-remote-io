@@ -1,4 +1,4 @@
-package s3factory
+package s3
 
 import (
 	"context"

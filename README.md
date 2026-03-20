@@ -5,40 +5,41 @@
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/go-remote-io)](https://github.com/shouni/go-remote-io/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および**ローカルファイルシステム**への I/O 操作を統一的に扱うための Go 言語製ライブラリです。
+## 🚀 概要 (About) - 両翼を統べる、透過的マルチクラウド I/O インターフェース
 
-このライブラリは、アプリケーションの I/O 依存性を抽象化し、ビジネスロジックから各クラウドストレージやローカルファイルの判別・接続ロジックを完全に分離します。
+Go Remote IO は、**Google Cloud Storage (GCS)** と **Amazon S3**、そして**ローカルファイルシステム**を、あたかも一つの場所であるかのように扱うための Go 言語製 I/O ライブラリです。
 
----
+URI プロトコル（`gs://`, `s3://`, `/path/to/`）に基づいて最適なストレージ実装を自動的に選択するため、ビジネスロジックは「どこに保存されているか」の詳細を意識することなく、純粋なデータ処理に集中できます。
 
-## ✨ 主要な機能と特徴
+-----
 
-* **ユニバーサル I/O**: URIのプレフィックスに応じて、**GCS (`gs://`)**、**Amazon S3 (`s3://`)**、または**ローカルファイルパス**へのI/O処理を**透過的に**切り替えます。
-* **リソース管理とDI (`package gcsfactory` / `package s3factory` が担当)**:
-    * **`gcsfactory`パッケージ**: **GCSクライアント**のみを初期化・管理し、GCP環境に特化します。
-    * **`s3factory`パッケージ**: **S3クライアント**のみを初期化・管理し、AWS環境に特化することで、**認証情報の依存関係を完全に分離**します。
-* **統一された入力インターフェース**: `remoteio.InputReader` インターフェースを提供し、URI (例: `gs://`, `s3://`) またはローカルファイルパスのどちらが渡されても、ファクトリを介して透過的に `io.ReadCloser` を開きます。
-* **統一された出力インターフェース**: `remoteio.OutputWriter` インターフェースを提供します。このインターフェースは**汎用的な `Write(ctx, uri, reader, contentType)` メソッド**を核とし、GCS/S3/ローカルへの書き込みを**透過的に**処理します。
-* **期限付きURLの生成**: `remoteio.URLSigner` インターフェースを提供します。GCS および S3 URIに対して**期限付きの署名付きURL (Signed URL)** を生成できます。
-* **関心事の分離**: 外部サービスアクセス (`storage.Client`, `s3.Client`) の初期化は外部のファクトリに依存し、I/Oロジック自体は純粋に `remoteio` パッケージ内で完結します。
-* **メモリ効率に優れたリスティング**: `List` メソッドは**コールバック方式**（ストリーミング）を採用しています。数百万のオブジェクトが存在するバケットでも、メモリを圧迫せずに一覧処理やフィルタリングが可能です。
+## ✨ 提供機能 (Features)
 
----
+* **ユニバーサル I/O**: URI のプレフィックスに応じて、**GCS**、**S3**、**ローカルファイル**へのアクセスを**透過的に**切り替えます。
+* **プラグイン可能な実装 (`remoteio/gcs`, `remoteio/s3`)**:
+  * **GCS サブパッケージ**: Google Cloud Storage 公式クライアントを用いた高機能な I/O 実装を提供します。
+  * **S3 サブパッケージ**: AWS SDK v2 に基づく S3 実装を提供。認証情報の管理をパッケージ単位で分離し、不要な依存関係の混入を防ぎます。
+* **統一された Reader / Writer インターフェース**: URI が渡されるだけで適切な `io.ReadCloser` や書き込みストリームを生成する、シンプルで強力な `InputReader` と `OutputWriter` を提供します。
+* **署名付き URL (Signed URL) の生成**: GCS および S3 リソースに対して、期限付きの署名付き URL を生成する `URLSigner` インターフェースをサポート。
+* **効率的なリスティング**: オブジェクトの一覧取得には**コールバック（ストリーミング）方式**を採用。数百万規模のオブジェクトが存在するバケットでも、メモリ消費を最小限に抑えた処理が可能です。
+* **DI (Dependency Injection) フレンドリー**: 各ストレージクライアントの初期化は外部のファクトリに委ねる設計になっており、テスト時のモック化や環境ごとの設定変更が容易です。
 
-## 📐 ライブラリ構成
+-----
+
+## 🏗 プロジェクトレイアウト (Project Layout)
 
 ```text
 go-remote-io/
-├── remoteio/                 # I/Oの核となる機能（インターフェース + Universal実装）
-│   ├── interfaces.go         # InputReader / OutputWriter / URLSigner 等の定義
-│   ├── reader.go             # UniversalInputReader (GCS/S3/Local の振分け)
-│   ├── writer.go             # UniversalIOWriter (GCS/S3/Local への書き込み)
-│   ├── signer.go             # URLSigner 実装 (URIに応じた署名URL生成)
-│   └── util.go               # URI判定・解析 (IsRemoteURI / ParseGCSURI 等)
-├── gcsfactory/               # GCS専用Factory
-│   └── factory.go            # GCSクライアントの初期化・コンポーネント提供
-└── s3factory/                # S3専用Factory
-    └── factory.go            # S3クライアントの初期化・コンポーネント提供
+└── remoteio/             # I/Oの核となる抽象化レイヤー
+    ├── gcs/              # GCS 具象実装（旧 gcsfactory）
+    │   └── factory.go    # GCS クライアントの管理と初期化
+    ├── s3/               # S3 具象実装（旧 s3factory）
+    │   └── factory.go    # S3 クライアントの管理と初期化
+    ├── interfaces.go     # IOFactory / InputReader / OutputWriter 等の定義
+    ├── reader.go         # UniversalInputReader (マルチプロトコル読み込み)
+    ├── writer.go         # UniversalIOWriter (マルチプロトコル書き込み)
+    ├── signer.go         # URLSigner (署名付きURL生成の抽象化)
+    └── util.go           # URIの判定・解析ユーティリティ
 ```
 
 ### 🛠️ 主要な依存関係 (Dependencies)
@@ -46,7 +47,7 @@ go-remote-io/
 | サービス | パッケージ / リンク | 説明 |
 | :--- | :--- | :--- |
 | **GCS** | [cloud.google.com/go/storage](https://github.com/googleapis/google-cloud-go/tree/main/storage) | Google Cloud Storage 公式 Go クライアント |
-| **AWS S3** | [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) | AWS SDK for Go v2 (S3/Config/Signer) |
+| **AWS S3** | [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) | AWS SDK for Go v2 |
 | **Testing** | [testify](https://github.com/stretchr/testify) | アサーションおよびモック用テストフレームワーク |
 
 ---
@@ -54,3 +55,5 @@ go-remote-io/
 ### 📜 ライセンス (License)
 
 このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
+
+---

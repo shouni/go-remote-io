@@ -13,7 +13,7 @@ import (
 // S3ClientFactory は remoteio.IOFactory インターフェースを実装し、
 // AWS/S3クライアントとS3関連のI/Oコンポーネントを管理します。
 type S3ClientFactory struct {
-	s3Client  *s3.Client
+	client    *s3.Client
 	awsConfig aws.Config
 }
 
@@ -32,7 +32,7 @@ func New(ctx context.Context) (remoteio.IOFactory, error) {
 
 	// 2. S3 クライアントの初期化とファクトリの生成
 	return &S3ClientFactory{
-		s3Client:  s3.NewFromConfig(awsCfg),
+		client:    s3.NewFromConfig(awsCfg),
 		awsConfig: awsCfg,
 	}, nil
 }
@@ -52,7 +52,7 @@ func (f *S3ClientFactory) Reader() (remoteio.Reader, error) {
 
 // InputReader は、S3クライアントを注入した InputReader を生成します。
 func (f *S3ClientFactory) InputReader() (remoteio.InputReader, error) {
-	s3Client, err := f.getS3Client()
+	s3Client, err := f.S3Client()
 	if err != nil {
 		return nil, fmt.Errorf("InputReaderを生成できません: %w", err)
 	}
@@ -70,7 +70,7 @@ func (f *S3ClientFactory) Writer() (remoteio.Writer, error) {
 
 // OutputWriter は、S3クライアントを注入した OutputWriter を生成します。
 func (f *S3ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	s3Client, err := f.getS3Client()
+	s3Client, err := f.S3Client()
 	if err != nil {
 		return nil, fmt.Errorf("OutputWriterを生成できません: %w", err)
 	}
@@ -83,7 +83,7 @@ func (f *S3ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
 
 // URLSigner は、S3クライアントを注入した URLSigner の具象実装を返します。
 func (f *S3ClientFactory) URLSigner() (remoteio.URLSigner, error) {
-	client, err := f.getS3Client()
+	client, err := f.S3Client()
 	if err != nil {
 		return nil, fmt.Errorf("S3 URLSignerを生成できません: %w", err)
 	}
@@ -91,9 +91,9 @@ func (f *S3ClientFactory) URLSigner() (remoteio.URLSigner, error) {
 }
 
 // getS3Client は、ファクトリが保持するS3クライアントを返します。
-func (f *S3ClientFactory) getS3Client() (*s3.Client, error) {
-	if f.s3Client == nil {
+func (f *S3ClientFactory) S3Client() (*s3.Client, error) {
+	if f.client == nil {
 		return nil, fmt.Errorf("S3クライアントは初期化されていません")
 	}
-	return f.s3Client, nil
+	return f.client, nil
 }

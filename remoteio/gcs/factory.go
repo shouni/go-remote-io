@@ -42,7 +42,7 @@ func (f *GCSClientFactory) Reader() (remoteio.Reader, error) {
 
 // InputReader は読み込みと一覧取得の両方の機能を提供します。
 func (f *GCSClientFactory) InputReader() (remoteio.InputReader, error) {
-	client, err := f.GCSClient()
+	client, err := f.gcsClient()
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (f *GCSClientFactory) Writer() (remoteio.Writer, error) {
 
 // OutputWriter は書き込み機能を提供します。
 func (f *GCSClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	client, err := f.GCSClient()
+	client, err := f.gcsClient()
 	if err != nil {
 		return nil, err
 	}
@@ -70,16 +70,16 @@ func (f *GCSClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
 
 // URLSigner は署名付きURLの生成機能を提供します。
 func (f *GCSClientFactory) URLSigner() (remoteio.URLSigner, error) {
-	client, err := f.GCSClient()
+	client, err := f.gcsClient()
 	if err != nil {
 		return nil, err
 	}
 	return remoteio.NewGCSURLSigner(client), nil
 }
 
-// GCSClient は内部用のヘルパーメソッドです。
+// gcsClient は内部用のヘルパーメソッドです。
 // クライアントが存命かチェックし、生のリソースを返します。
-func (f *GCSClientFactory) GCSClient() (*storage.Client, error) {
+func (f *GCSClientFactory) gcsClient() (*storage.Client, error) {
 	if f.client == nil {
 		return nil, fmt.Errorf("GCSクライアントは既にクローズされているか、初期化されていません")
 	}

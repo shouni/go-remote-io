@@ -10,15 +10,14 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// S3ClientFactory は Factory インターフェースを実装し、
+// S3ClientFactory は remoteio.IOFactory インターフェースを実装し、
 // AWS/S3クライアントとS3関連のI/Oコンポーネントを管理します。
 type S3ClientFactory struct {
-	s3Client  *s3.Client
+	client    *s3.Client
 	awsConfig aws.Config
 }
 
-// New は新しい S3ClientFactory インスタンスを作成します。
-// sync.Once を削除し、初期化ロジックを直接実行します。
+// New は新しい S3ClientFactory インスタンスを作成し、remoteio.IOFactory として返します。
 func New(ctx context.Context) (remoteio.IOFactory, error) {
 	// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)
 	awsCfg, err := config.LoadDefaultConfig(ctx)
@@ -26,6 +25,7 @@ func New(ctx context.Context) (remoteio.IOFactory, error) {
 		return nil, fmt.Errorf("AWS設定のロードに失敗しました (認証情報が不足しています): %w", err)
 	}
 
+	// リージョンが未設定の場合はデフォルト値を適用
 	const defaultRegion = "ap-northeast-1"
 	if awsCfg.Region == "" {
 		awsCfg.Region = defaultRegion
@@ -33,56 +33,69 @@ func New(ctx context.Context) (remoteio.IOFactory, error) {
 
 	// 2. S3 クライアントの初期化とファクトリの生成
 	return &S3ClientFactory{
-		s3Client:  s3.NewFromConfig(awsCfg),
+		client:    s3.NewFromConfig(awsCfg),
 		awsConfig: awsCfg,
 	}, nil
 }
 
-// Close インターフェース要件に準拠するために実装されたno-opメソッドです。
+// Close はインターフェース要件に準拠するために実装された no-op メソッドです。
 func (f *S3ClientFactory) Close() error {
-	// aws-sdk-go-v2 の s3.Client は基本的に Close 不要。
-	// インターフェース統一のため no-op で実装する。
+	// aws-sdk-go-v2 の s3.Client は Close 不要なため、フィールドを nil にして安全を確保します。
+	f.client = nil
 	return nil
 }
 
-// InputReader は、S3クライアントのみを注入した InputReader を生成します。
-// GCSクライアントはnilを渡します。
+// --- Reader / InputReader 関連 ---
+
+// Reader は単一リソースの読み込み機能を提供します。
+func (f *S3ClientFactory) Reader() (remoteio.Reader, error) {
+	return f.InputReader()
+}
+
+// InputReader は、S3クライアントを注入した InputReader を生成します。
 func (f *S3ClientFactory) InputReader() (remoteio.InputReader, error) {
-	s3Client, err := f.getS3Client()
+	client, err := f.s3Client()
 	if err != nil {
-		return nil, fmt.Errorf("InputReaderを生成できません: S3クライアントの初期化に失敗しました")
+		return nil, err
 	}
 
 	// remoteio.NewUniversalInputReader を使用 (GCSクライアントはnil)
-	return remoteio.NewUniversalInputReader(nil, s3Client), nil
+	return remoteio.NewUniversalInputReader(nil, client), nil
 }
 
-// OutputWriter は、S3クライアントのみを注入した OutputWriter を生成します。
-// GCSクライアントはnilを渡します。
+// --- Writer / OutputWriter 関連 ---
+
+// Writer は単一リソースの書き込み機能を提供します。
+func (f *S3ClientFactory) Writer() (remoteio.Writer, error) {
+	return f.OutputWriter()
+}
+
+// OutputWriter は、S3クライアントを注入した OutputWriter を生成します。
 func (f *S3ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	s3Client, err := f.getS3Client()
+	client, err := f.s3Client()
 	if err != nil {
-		return nil, fmt.Errorf("OutputWriterを生成できません: S3クライアントの初期化に失敗しました")
+		return nil, err
 	}
 
 	// remoteio.NewUniversalIOWriter を使用 (GCSクライアントはnil)
-	return remoteio.NewUniversalIOWriter(nil, s3Client), nil
+	return remoteio.NewUniversalIOWriter(nil, client), nil
 }
+
+// --- その他 ---
 
 // URLSigner は、S3クライアントを注入した URLSigner の具象実装を返します。
 func (f *S3ClientFactory) URLSigner() (remoteio.URLSigner, error) {
-	client, err := f.getS3Client()
+	client, err := f.s3Client()
 	if err != nil {
-		return nil, fmt.Errorf("S3 URLSignerを生成できません: %w", err)
+		return nil, err
 	}
-	// remoteio.NewS3URLSigner を使用
 	return remoteio.NewS3URLSigner(client), nil
 }
 
-// getS3Client は、ファクトリが保持するS3クライアントを返します。
-func (f *S3ClientFactory) getS3Client() (*s3.Client, error) {
-	if f.s3Client == nil {
-		return nil, fmt.Errorf("S3クライアントは初期化に失敗しています")
+// s3Client は、ファクトリが保持するS3クライアントを返します（内部用）。
+func (f *S3ClientFactory) s3Client() (*s3.Client, error) {
+	if f.client == nil {
+		return nil, fmt.Errorf("S3クライアントは初期化されていないか、既にクローズされています")
 	}
-	return f.s3Client, nil
+	return f.client, nil
 }

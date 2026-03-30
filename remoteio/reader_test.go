@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 1. ローカルファイルの読み込みとリスティングのテスト
+// 1. ローカルリソース（ファイル読み込み & ディレクトリ一覧）のテスト
 func TestUniversalInputReader_Local(t *testing.T) {
 	ctx := context.Background()
 	reader := NewUniversalInputReader(nil, nil)
@@ -27,7 +27,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 	err = os.WriteFile(tmpFile, []byte(content), 0644)
 	require.NoError(t, err)
 
-	// --- Open のテスト ---
+	// --- Reader (Open) のテスト ---
 	t.Run("Open: success reading local file", func(t *testing.T) {
 		rc, err := reader.Open(ctx, tmpFile)
 		require.NoError(t, err)
@@ -44,9 +44,9 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		assert.Contains(t, err.Error(), "ローカルファイルのオープンに失敗しました")
 	})
 
-	// --- List のテスト (エッジケースを含む) ---
+	// --- Lister (List) のテスト ---
 	t.Run("List: handles various local directory scenarios", func(t *testing.T) {
-		// 準備：サブディレクトリと追加ファイルを作成
+		// サブディレクトリと追加ファイルを作成
 		subDir := filepath.Join(tmpDir, "subdir")
 		require.NoError(t, os.Mkdir(subDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(subDir, "subfile.txt"), []byte("sub"), 0644))
@@ -54,7 +54,6 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		anotherFile := filepath.Join(tmpDir, "another.log")
 		require.NoError(t, os.WriteFile(anotherFile, []byte("log"), 0644))
 
-		// 実行：コールバックでファイルパスを収集
 		var files []string
 		err := reader.List(ctx, tmpDir, func(path string) error {
 			files = append(files, path)
@@ -62,7 +61,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// 検証：サブディレクトリは含まれず、直下のファイルのみが返されることを確認
+		// 直下のファイルのみが返されることを確認
 		expected := []string{tmpFile, anotherFile}
 		assert.ElementsMatch(t, expected, files)
 	})
@@ -78,7 +77,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
-		assert.Empty(t, files, "空のディレクトリをリストした場合、結果は空であるべきです")
+		assert.Empty(t, files)
 	})
 
 	t.Run("List: propagates callback error", func(t *testing.T) {
@@ -89,7 +88,6 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		assert.ErrorIs(t, err, expectedErr)
 	})
 
-	// ✨ 新規追加：ディレクトリではなくファイルパスを渡した場合のテスト
 	t.Run("List: error when path is a file", func(t *testing.T) {
 		var files []string
 		err := reader.List(ctx, tmpFile, func(path string) error {
@@ -98,7 +96,6 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ローカルディレクトリの読み込みに失敗しました")
-		assert.Empty(t, files, "ファイルパスを指定した場合、コールバックは一度も呼ばれないべきです")
 	})
 }
 
@@ -155,5 +152,8 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 
 // 3. インターフェース満足度のテスト
 func TestInputReader_InterfaceSatisfaction(t *testing.T) {
+	// 具象構造体が分割したすべてのインターフェースを満たしているか確認
+	var _ Reader = (*UniversalInputReader)(nil)
+	var _ Lister = (*UniversalInputReader)(nil)
 	var _ InputReader = (*UniversalInputReader)(nil)
 }

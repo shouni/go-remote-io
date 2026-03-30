@@ -16,11 +16,12 @@ func TestUniversalIOWriter_WriteToLocal(t *testing.T) {
 	ctx := context.Background()
 	writer := NewUniversalIOWriter(nil, nil)
 
-	tmpDir, err := os.MkdirTemp("", "remoteio_test")
+	tmpDir, err := os.MkdirTemp("", "remoteio_writer_test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	t.Run("success writing to local file", func(t *testing.T) {
+	t.Run("success writing to local file and directory creation", func(t *testing.T) {
+		// ネストしたディレクトリへの書き込みテスト（自動生成されるか確認）
 		targetPath := filepath.Join(tmpDir, "sub/dir/test.txt")
 		content := "Hello, Local IO!"
 		reader := bytes.NewReader([]byte(content))
@@ -46,19 +47,18 @@ func TestUniversalIOWriter_Write_Dispatch(t *testing.T) {
 		expectedErr string
 	}{
 		{
-			name:        "GCS path dispatch",
+			name:        "GCS path dispatch - client error",
 			uri:         "gs://my-bucket/path/to/obj",
-			expectedErr: "GCSクライアントが初期化されていません",
+			expectedErr: "GCSクライアントが初期化されていません", // 修正: 実装に合わせる
 		},
 		{
-			name:        "S3 path dispatch",
+			name:        "S3 path dispatch - client error",
 			uri:         "s3://my-bucket/path/to/obj",
-			expectedErr: "S3クライアントが初期化されていません",
+			expectedErr: "S3クライアントが初期化されていません", // 修正: 実装に合わせる
 		},
 		{
-			name: "Invalid GCS URI",
-			uri:  "gs://",
-			// ParseGCSURI がエラーを返すようになったため、Write メソッドが返すエラープレフィックスを期待値にします
+			name:        "Invalid GCS URI format",
+			uri:         "gs://",
 			expectedErr: "GCS URIのパースに失敗しました",
 		},
 	}
@@ -72,8 +72,8 @@ func TestUniversalIOWriter_Write_Dispatch(t *testing.T) {
 	}
 }
 
-// 3. パラメータバリデーションのテスト
-func TestUniversalIOWriter_Validation(t *testing.T) {
+// 3. パラメータバリデーションのテスト (内部メソッドの直接テスト)
+func TestUniversalIOWriter_InternalValidation(t *testing.T) {
 	ctx := context.Background()
 	writer := NewUniversalIOWriter(nil, nil)
 
@@ -89,6 +89,8 @@ func TestUniversalIOWriter_Validation(t *testing.T) {
 }
 
 // 4. インターフェース満足度のテスト
-func TestInterfaceSatisfaction(t *testing.T) {
+func TestOutputWriter_InterfaceSatisfaction(t *testing.T) {
+	// 具象構造体が分割したすべての書き込みインターフェースを満たしているか確認
+	var _ Writer = (*UniversalIOWriter)(nil)
 	var _ OutputWriter = (*UniversalIOWriter)(nil)
 }

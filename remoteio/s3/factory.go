@@ -7,18 +7,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// S3ClientFactory は remoteio.IOFactory インターフェースを実装し、
-// AWS/S3クライアントとS3関連のI/Oコンポーネントを管理します。
+// S3ClientFactory は AWS/S3クライアントとS3関連のI/Oコンポーネントを管理します。
 type S3ClientFactory struct {
 	client    *s3.Client
 	awsConfig aws.Config
 }
 
-// New は新しい S3ClientFactory インスタンスを作成し、remoteio.IOFactory として返します。
-func New(ctx context.Context) (remoteio.IOFactory, error) {
+// New は新しい S3ClientFactory インスタンスを作成します。
+func New(ctx context.Context) (*S3ClientFactory, error) {
 	// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {

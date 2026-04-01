@@ -5,16 +5,17 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/storage"
+
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// GCSClientFactory は remoteio.IOFactory インターフェースを実装します。
+// GCSClientFactory は、GCS関連のI/Oコンポーネントを管理します。
 type GCSClientFactory struct {
 	client *storage.Client
 }
 
-// New は GCSClientFactory インスタンスを作成し、remoteio.IOFactory として返します。
-func New(ctx context.Context) (remoteio.IOFactory, error) {
+// New は GCSClientFactory インスタンスを作成します。
+func New(ctx context.Context) (*GCSClientFactory, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("GCSクライアントの初期化に失敗しました: %w", err)

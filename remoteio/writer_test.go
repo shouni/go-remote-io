@@ -49,12 +49,12 @@ func TestUniversalIOWriter_Write_Dispatch(t *testing.T) {
 		{
 			name:        "GCS path dispatch - client error",
 			uri:         "gs://my-bucket/path/to/obj",
-			expectedErr: "GCSクライアントが初期化されていません", // 修正: 実装に合わせる
+			expectedErr: "GCSクライアントが初期化されていません",
 		},
 		{
 			name:        "S3 path dispatch - client error",
 			uri:         "s3://my-bucket/path/to/obj",
-			expectedErr: "S3クライアントが初期化されていません", // 修正: 実装に合わせる
+			expectedErr: "S3クライアントが初期化されていません",
 		},
 		{
 			name:        "Invalid GCS URI format",
@@ -84,7 +84,7 @@ func TestUniversalIOWriter_InternalValidation(t *testing.T) {
 
 	t.Run("empty object path for S3", func(t *testing.T) {
 		err := writer.WriteToS3(ctx, "bucket", "", nil, "")
-		assert.ErrorContains(t, err, "バケット名またはオブジェクトパスが空です")
+		assert.ErrorContains(t, err, "S3への書き込みに失敗しました: オブジェクトパスが空です")
 	})
 }
 

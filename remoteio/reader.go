@@ -34,21 +34,23 @@ func NewUniversalInputReader(gcsClient *storage.Client, s3Client *s3.Client) *Un
 // コアロジック (実装)
 // =================================================================
 
-func (r *UniversalInputReader) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	if IsGCSURI(filePath) {
-		return r.openGCSObject(ctx, filePath)
+// Open は指定されたファイルパスに対応するリーダーを返します。
+func (r *UniversalInputReader) Open(ctx context.Context, path string) (io.ReadCloser, error) {
+	if IsGCSURI(path) {
+		return r.openGCSObject(ctx, path)
 	}
-	if IsS3URI(filePath) {
-		return r.openS3Object(ctx, filePath)
+	if IsS3URI(path) {
+		return r.openS3Object(ctx, path)
 	}
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("ローカルファイルのオープンに失敗しました: %w", err)
 	}
 	return file, nil
 }
 
+// List は指定されたパス内のファイルを再帰的にリストし、コールバック関数に渡します。
 func (r *UniversalInputReader) List(ctx context.Context, path string, callback func(string) error) error {
 	if IsGCSURI(path) {
 		return r.listGCSObjects(ctx, path, callback)
@@ -76,11 +78,12 @@ func (r *UniversalInputReader) List(ctx context.Context, path string, callback f
 // GCS / S3 内部実装
 // =================================================================
 
+// openGCSObject は指定された GCS URI に対応するリーダーを返します。
 func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string) (io.ReadCloser, error) {
 	if r.gcsClient == nil {
 		return nil, fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
-	bucketName, objectName, err := ParseGCSURI(gcsURI)
+	bucketName, objectName, err := ParseRemoteURI(gcsURI)
 	if err != nil {
 		return nil, err
 	}
@@ -98,11 +101,12 @@ func (r *UniversalInputReader) openGCSObject(ctx context.Context, gcsURI string)
 	return rc, nil
 }
 
+// listGCSObjects は指定された GCS URI に対応するオブジェクトを再帰的にリストし、コールバック関数に渡します。
 func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string, callback func(string) error) error {
 	if r.gcsClient == nil {
 		return fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
-	bucketName, prefix, err := ParseGCSURI(gcsURI)
+	bucketName, prefix, err := ParseRemoteURI(gcsURI)
 	if err != nil {
 		return err
 	}
@@ -122,7 +126,7 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 		if attrs.Name == prefix {
 			continue
 		}
-		fullPath := fmt.Sprintf("gs://%s/%s", bucketName, attrs.Name)
+		fullPath := BuildGCSURI(bucketName, attrs.Name)
 		if err := callback(fullPath); err != nil {
 			return err
 		}
@@ -130,11 +134,12 @@ func (r *UniversalInputReader) listGCSObjects(ctx context.Context, gcsURI string
 	return nil
 }
 
+// openS3Object は指定された S3 URI に対応するリーダーを返します。
 func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (io.ReadCloser, error) {
 	if r.s3Client == nil {
 		return nil, fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
-	bucketName, objectPath, err := ParseS3URI(s3URI)
+	bucketName, objectPath, err := ParseRemoteURI(s3URI)
 	if err != nil {
 		return nil, err
 	}
@@ -147,8 +152,7 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 		Key:    aws.String(objectPath),
 	})
 	if err != nil {
-		var noSuchKey *types.NoSuchKey
-		if errors.As(err, &noSuchKey) {
+		if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
 			return nil, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("S3読み込み失敗 (URI: %s): %w", s3URI, err)
@@ -156,11 +160,12 @@ func (r *UniversalInputReader) openS3Object(ctx context.Context, s3URI string) (
 	return result.Body, nil
 }
 
+// listS3Objects は指定された S3 URI に対応するオブジェクトを再帰的にリストし、コールバック関数に渡します。
 func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, callback func(string) error) error {
 	if r.s3Client == nil {
 		return fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
-	bucketName, prefix, err := ParseS3URI(s3URI)
+	bucketName, prefix, err := ParseRemoteURI(s3URI)
 	if err != nil {
 		return err
 	}
@@ -182,7 +187,7 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, 
 			if *obj.Key == prefix {
 				continue
 			}
-			fullPath := fmt.Sprintf("s3://%s/%s", bucketName, *obj.Key)
+			fullPath := BuildS3URI(bucketName, *obj.Key)
 			if err := callback(fullPath); err != nil {
 				return err
 			}

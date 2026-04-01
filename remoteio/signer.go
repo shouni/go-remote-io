@@ -19,21 +19,23 @@ type gcsURLSigner struct {
 	client *storage.Client
 }
 
+// NewGCSURLSigner は GCS URLSigner を初期化します。
 func NewGCSURLSigner(client *storage.Client) URLSigner {
 	return &gcsURLSigner{client: client}
 }
 
-func (s *gcsURLSigner) GenerateSignedURL(ctx context.Context, uri string, method string, expires time.Duration) (string, error) {
+// GenerateSignedURL は GCS URI に対応する署名付きURLを生成します。
+func (s *gcsURLSigner) GenerateSignedURL(ctx context.Context, path string, method string, expires time.Duration) (string, error) {
 	// クライアントの初期化チェック
 	if s.client == nil {
 		return "", fmt.Errorf("GCSクライアントが初期化されていないため、署名付きURLを生成できません")
 	}
 
-	if !IsGCSURI(uri) {
-		return "", fmt.Errorf("署名付きURLはGCS URI (gs://...) のみサポートされます: %s", uri)
+	if !IsGCSURI(path) {
+		return "", fmt.Errorf("署名付きURLはGCS URI (gs://...) のみサポートされます: %s", path)
 	}
 
-	bucketName, objectPath, err := ParseGCSURI(uri)
+	bucketName, objectPath, err := ParseRemoteURI(path)
 	if err != nil {
 		return "", fmt.Errorf("GCS URIの解析に失敗: %w", err)
 	}
@@ -55,6 +57,7 @@ type s3URLSigner struct {
 	client *s3.PresignClient
 }
 
+// NewS3URLSigner は S3 URLSigner を初期化します。
 func NewS3URLSigner(s3Client *s3.Client) URLSigner {
 	// AWS SDK v2 の NewPresignClient は nil を渡すとパニックするためガード
 	var presignClient *s3.PresignClient
@@ -66,17 +69,18 @@ func NewS3URLSigner(s3Client *s3.Client) URLSigner {
 	}
 }
 
-func (s *s3URLSigner) GenerateSignedURL(ctx context.Context, uri string, method string, expires time.Duration) (string, error) {
+// GenerateSignedURL は S3 URI に対応する署名付きURLを生成します。
+func (s *s3URLSigner) GenerateSignedURL(ctx context.Context, path string, method string, expires time.Duration) (string, error) {
 	// クライアントの初期化チェック
 	if s.client == nil {
 		return "", fmt.Errorf("S3クライアントが初期化されていないため、署名付きURLを生成できません")
 	}
 
-	if !IsS3URI(uri) {
-		return "", fmt.Errorf("署名付きURLはS3 URI (s3://...) のみサポートされます: %s", uri)
+	if !IsS3URI(path) {
+		return "", fmt.Errorf("署名付きURLはS3 URI (s3://...) のみサポートされます: %s", path)
 	}
 
-	bucketName, objectPath, err := ParseS3URI(uri)
+	bucketName, objectPath, err := ParseRemoteURI(path)
 	if err != nil {
 		return "", fmt.Errorf("S3 URIの解析に失敗しました: %w", err)
 	}

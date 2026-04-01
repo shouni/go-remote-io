@@ -37,21 +37,17 @@ func NewUniversalIOWriter(gcsClient *storage.Client, s3Client *s3.Client) *Unive
 
 // Write は OutputWriter インターフェースの汎用メソッドを実装します。
 // パスのプレフィックスを見て WriteToGCS, WriteToS3, または WriteToLocal へ処理を委譲します。
-func (w *UniversalIOWriter) Write(ctx context.Context, uri string, contentReader io.Reader, contentType string) error {
-	if IsGCSURI(uri) {
-		// GCSへの書き込み
-		// util.go の ParseGCSURI を使用
-		bucketName, objectPath, err := ParseGCSURI(uri)
+func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReader io.Reader, contentType string) error {
+	if IsGCSURI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {
 			return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
 		}
 		return w.WriteToGCS(ctx, bucketName, objectPath, contentReader, contentType)
 	}
 
-	if IsS3URI(uri) {
-		// S3への書き込み
-		// util.go の ParseS3URI を使用
-		bucketName, objectPath, err := ParseS3URI(uri)
+	if IsS3URI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {
 			return fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
 		}
@@ -59,13 +55,11 @@ func (w *UniversalIOWriter) Write(ctx context.Context, uri string, contentReader
 	}
 
 	// ローカルファイルへの書き込み (contentTypeは無視される)
-	return w.WriteToLocal(ctx, uri, contentReader)
+	return w.WriteToLocal(ctx, path, contentReader)
 }
 
 // WriteToGCS は GCSOutputWriter インターフェースを実装します。
 func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
-	targetURI := fmt.Sprintf("gs://%s/%s", bucketName, objectPath)
-
 	if bucketName == "" {
 		return fmt.Errorf("GCSへの書き込みに失敗しました: バケット名が空です")
 	}
@@ -77,6 +71,7 @@ func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPa
 		return fmt.Errorf("GCSへの書き込みに失敗しました: GCSクライアントが初期化されていません")
 	}
 
+	targetURI := BuildGCSURI(bucketName, objectPath)
 	slog.Info("GCS書き込み処理開始", slog.String("uri", targetURI), slog.String("content_type", contentType))
 
 	bucket := w.gcsClient.Bucket(bucketName)
@@ -108,15 +103,18 @@ func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPa
 
 // WriteToS3 は S3OutputWriter インターフェースを実装します。
 func (w *UniversalIOWriter) WriteToS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
-	targetURI := fmt.Sprintf("s3://%s/%s", bucketName, objectPath)
-
-	if bucketName == "" || objectPath == "" {
-		return fmt.Errorf("S3への書き込みに失敗しました: バケット名またはオブジェクトパスが空です")
+	if bucketName == "" {
+		return fmt.Errorf("S3への書き込みに失敗しました: バケット名が空です")
+	}
+	if objectPath == "" {
+		return fmt.Errorf("S3への書き込みに失敗しました: オブジェクトパスが空です")
 	}
 	if w.s3Client == nil {
+		// このチェックはFactory側でもされるが、堅牢性向上のため
 		return fmt.Errorf("S3への書き込みに失敗しました: S3クライアントが初期化されていません")
 	}
 
+	targetURI := BuildS3URI(bucketName, objectPath)
 	slog.Info("S3書き込み処理開始", slog.String("uri", targetURI), slog.String("content_type", contentType))
 
 	// S3 PutObject APIを呼び出す

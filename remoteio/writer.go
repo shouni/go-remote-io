@@ -38,8 +38,8 @@ func NewUniversalIOWriter(gcsClient *storage.Client, s3Client *s3.Client) *Unive
 // Write は OutputWriter インターフェースの汎用メソッドを実装します。
 // パスのプレフィックスを見て WriteToGCS, WriteToS3, または WriteToLocal へ処理を委譲します。
 func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReader io.Reader, contentType string) error {
-	bucketName, objectPath, err := ParseRemoteURI(path)
 	if IsGCSURI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {
 			return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
 		}
@@ -47,6 +47,7 @@ func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReade
 	}
 
 	if IsS3URI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {
 			return fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
 		}

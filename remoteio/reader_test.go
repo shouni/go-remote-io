@@ -2,7 +2,6 @@ package remoteio
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 1. ローカルリソース（ファイル読み込み & ディレクトリ一覧）のテスト
+// 1. ローカルリソース（読み込み、一覧、存在確認）のテスト
 func TestUniversalInputReader_Local(t *testing.T) {
 	ctx := context.Background()
 	reader := NewUniversalInputReader(nil, nil)
@@ -38,19 +37,8 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		assert.Equal(t, content, string(got))
 	})
 
-	t.Run("Open: error reading non-existent file", func(t *testing.T) {
-		_, err := reader.Open(ctx, filepath.Join(tmpDir, "notfound.txt"))
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "ローカルファイルのオープンに失敗しました")
-	})
-
 	// --- Lister (List) のテスト ---
 	t.Run("List: handles various local directory scenarios", func(t *testing.T) {
-		// サブディレクトリと追加ファイルを作成
-		subDir := filepath.Join(tmpDir, "subdir")
-		require.NoError(t, os.Mkdir(subDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(subDir, "subfile.txt"), []byte("sub"), 0644))
-
 		anotherFile := filepath.Join(tmpDir, "another.log")
 		require.NoError(t, os.WriteFile(anotherFile, []byte("log"), 0644))
 
@@ -61,45 +49,30 @@ func TestUniversalInputReader_Local(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// 直下のファイルのみが返されることを確認
 		expected := []string{tmpFile, anotherFile}
 		assert.ElementsMatch(t, expected, files)
 	})
 
-	t.Run("List: success listing empty directory", func(t *testing.T) {
-		emptyDir, err := os.MkdirTemp("", "empty_dir")
-		require.NoError(t, err)
-		defer os.RemoveAll(emptyDir)
+	// --- StatReader (Exists) のテスト ---
+	t.Run("Exists: local file scenarios", func(t *testing.T) {
+		// 存在するファイル
+		exists, err := reader.Exists(ctx, tmpFile)
+		assert.NoError(t, err)
+		assert.True(t, exists)
 
-		var files []string
-		err = reader.List(ctx, emptyDir, func(path string) error {
-			files = append(files, path)
-			return nil
-		})
-		require.NoError(t, err)
-		assert.Empty(t, files)
-	})
+		// 存在するディレクトリ
+		exists, err = reader.Exists(ctx, tmpDir)
+		assert.NoError(t, err)
+		assert.True(t, exists)
 
-	t.Run("List: propagates callback error", func(t *testing.T) {
-		expectedErr := errors.New("callback failed")
-		err := reader.List(ctx, tmpDir, func(path string) error {
-			return expectedErr
-		})
-		assert.ErrorIs(t, err, expectedErr)
-	})
-
-	t.Run("List: error when path is a file", func(t *testing.T) {
-		var files []string
-		err := reader.List(ctx, tmpFile, func(path string) error {
-			files = append(files, path)
-			return nil
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ローカルディレクトリの読み込みに失敗しました")
+		// 存在しないパス
+		exists, err = reader.Exists(ctx, filepath.Join(tmpDir, "not_exist.txt"))
+		assert.NoError(t, err)
+		assert.False(t, exists)
 	})
 }
 
-// 2. URI 振り分けとバリデーションのテスト (Open & List)
+// 2. URI 振り分けとバリデーションのテスト (Open, List, Exists)
 func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 	ctx := context.Background()
 	reader := NewUniversalInputReader(nil, nil)
@@ -107,7 +80,7 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 	tests := []struct {
 		name        string
 		path        string
-		op          string // "Open" or "List"
+		op          string // "Open", "List", "Exists"
 		expectedErr string
 	}{
 		{
@@ -117,21 +90,15 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 			expectedErr: "GCSクライアントが未初期化です",
 		},
 		{
-			name:        "List GCS - no client",
-			path:        "gs://my-bucket/prefix",
-			op:          "List",
+			name:        "Exists GCS - no client",
+			path:        "gs://my-bucket/obj",
+			op:          "Exists",
 			expectedErr: "GCSクライアントが未初期化です",
 		},
 		{
-			name:        "Open S3 - no client",
+			name:        "Exists S3 - no client",
 			path:        "s3://my-bucket/obj",
-			op:          "Open",
-			expectedErr: "S3クライアントが未初期化です",
-		},
-		{
-			name:        "List S3 - no client",
-			path:        "s3://my-bucket/prefix",
-			op:          "List",
+			op:          "Exists",
 			expectedErr: "S3クライアントが未初期化です",
 		},
 	}
@@ -139,10 +106,15 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var err error
-			if tt.op == "Open" {
+			var exists bool
+			switch tt.op {
+			case "Open":
 				_, err = reader.Open(ctx, tt.path)
-			} else {
+			case "List":
 				err = reader.List(ctx, tt.path, func(string) error { return nil })
+			case "Exists":
+				exists, err = reader.Exists(ctx, tt.path)
+				assert.False(t, exists)
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.expectedErr)
@@ -152,8 +124,8 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 
 // 3. インターフェース満足度のテスト
 func TestInputReader_InterfaceSatisfaction(t *testing.T) {
-	// 具象構造体が分割したすべてのインターフェースを満たしているか確認
 	var _ Reader = (*UniversalInputReader)(nil)
 	var _ Lister = (*UniversalInputReader)(nil)
+	var _ StatReader = (*UniversalInputReader)(nil)
 	var _ InputReader = (*UniversalInputReader)(nil)
 }

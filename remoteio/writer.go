@@ -188,20 +188,22 @@ func (w *UniversalIOWriter) Delete(ctx context.Context, path string) error {
 	return w.deleteLocal(path)
 }
 
+// deleteGCS は、GCSからリソースを削除します。
 func (w *UniversalIOWriter) deleteGCS(ctx context.Context, bucketName, objectPath string) error {
 	if w.gcsClient == nil {
-		return errors.New("gcs client is not initialized")
+		return errors.New("GCSクライアントが未初期化です")
 	}
 	err := w.gcsClient.Bucket(bucketName).Object(objectPath).Delete(ctx)
 	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
-		return fmt.Errorf("failed to delete GCS object: %w", err)
+		return fmt.Errorf("GCSオブジェクトの削除に失敗しました: %w", err)
 	}
 	return nil
 }
 
+// deleteS3 は、S3からリソースを削除します。
 func (w *UniversalIOWriter) deleteS3(ctx context.Context, bucketName, objectPath string) error {
 	if w.s3Client == nil {
-		return errors.New("s3 client is not initialized")
+		return errors.New("S3クライアントが未初期化です")
 	}
 	_, err := w.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(bucketName),
@@ -210,15 +212,16 @@ func (w *UniversalIOWriter) deleteS3(ctx context.Context, bucketName, objectPath
 
 	var nsk *types.NoSuchKey
 	if err != nil && !errors.As(err, &nsk) {
-		return fmt.Errorf("failed to delete S3 object: %w", err)
+		return fmt.Errorf("S3オブジェクトの削除に失敗しました: %w", err)
 	}
 	return nil
 }
 
+// deleteLocal は、ローカルファイルを削除します。
 func (w *UniversalIOWriter) deleteLocal(path string) error {
 	err := os.Remove(path)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete local file: %w", err)
+		return fmt.Errorf("ローカルファイルの削除に失敗しました: %w", err)
 	}
 	return nil
 }

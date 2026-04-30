@@ -216,6 +216,7 @@ func (r *UniversalInputReader) Exists(ctx context.Context, path string) (bool, e
 	return false, fmt.Errorf("ローカルファイルのステータス取得に失敗しました: %w", err)
 }
 
+// existsGCS は、GCSにリソースが存在するかを確認します。
 func (r *UniversalInputReader) existsGCS(ctx context.Context, gcsURI string) (bool, error) {
 	if r.gcsClient == nil {
 		return false, fmt.Errorf("GCSクライアントが未初期化です: %s", gcsURI)
@@ -235,6 +236,7 @@ func (r *UniversalInputReader) existsGCS(ctx context.Context, gcsURI string) (bo
 	return false, fmt.Errorf("GCS属性取得失敗: %w", err)
 }
 
+// existsS3 は、S3にリソースが存在するかを確認します。
 func (r *UniversalInputReader) existsS3(ctx context.Context, s3URI string) (bool, error) {
 	if r.s3Client == nil {
 		return false, fmt.Errorf("S3クライアントが未初期化です: %s", s3URI)

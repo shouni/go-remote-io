@@ -195,3 +195,68 @@ func (r *UniversalInputReader) listS3Objects(ctx context.Context, s3URI string, 
 	}
 	return nil
 }
+
+// Exists は指定されたパスにリソース（GCS、S3、またはローカルファイル）が存在するかを確認します。
+func (r *UniversalInputReader) Exists(ctx context.Context, path string) (bool, error) {
+	if IsGCSURI(path) {
+		return r.existsGCS(ctx, path)
+	}
+	if IsS3URI(path) {
+		return r.existsS3(ctx, path)
+	}
+
+	// ローカルファイルの存在確認
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("ローカルファイルのステータス取得に失敗しました: %w", err)
+}
+
+func (r *UniversalInputReader) existsGCS(ctx context.Context, gcsURI string) (bool, error) {
+	if r.gcsClient == nil {
+		return false, fmt.Errorf("GCSクライアントが未初期化です: %s", gcsURI)
+	}
+	bucketName, objectName, err := ParseRemoteURI(gcsURI)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = r.gcsClient.Bucket(bucketName).Object(objectName).Attrs(ctx)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("GCS属性取得失敗: %w", err)
+}
+
+func (r *UniversalInputReader) existsS3(ctx context.Context, s3URI string) (bool, error) {
+	if r.s3Client == nil {
+		return false, fmt.Errorf("S3クライアントが未初期化です: %s", s3URI)
+	}
+	bucketName, objectPath, err := ParseRemoteURI(s3URI)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = r.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectPath),
+	})
+	if err == nil {
+		return true, nil
+	}
+
+	// S3のHeadObjectは、存在しない場合に404を返します
+	var nf *types.NotFound
+	if _, ok := errors.AsType[*types.NoSuchKey](err); ok || errors.As(err, &nf) {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("S3属性取得失敗: %w", err)
+}

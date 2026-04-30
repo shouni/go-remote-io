@@ -2,6 +2,7 @@ package remoteio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 const DefaultContentType = "text/plain; charset=utf-8"
@@ -162,5 +164,61 @@ func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, conte
 	}
 
 	slog.Info("ローカル書き込み処理完了", slog.String("path", path))
+	return nil
+}
+
+// Delete はパスに応じて適切なストレージからリソースを削除します。
+func (w *UniversalIOWriter) Delete(ctx context.Context, path string) error {
+	if IsGCSURI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
+		if err != nil {
+			return fmt.Errorf("GCS URIのパース失敗: %w", err)
+		}
+		return w.deleteGCS(ctx, bucketName, objectPath)
+	}
+
+	if IsS3URI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
+		if err != nil {
+			return fmt.Errorf("S3 URIのパース失敗: %w", err)
+		}
+		return w.deleteS3(ctx, bucketName, objectPath)
+	}
+
+	return w.deleteLocal(path)
+}
+
+func (w *UniversalIOWriter) deleteGCS(ctx context.Context, bucketName, objectPath string) error {
+	if w.gcsClient == nil {
+		return errors.New("gcs client is not initialized")
+	}
+	err := w.gcsClient.Bucket(bucketName).Object(objectPath).Delete(ctx)
+	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return fmt.Errorf("failed to delete GCS object: %w", err)
+	}
+	return nil
+}
+
+func (w *UniversalIOWriter) deleteS3(ctx context.Context, bucketName, objectPath string) error {
+	if w.s3Client == nil {
+		return errors.New("s3 client is not initialized")
+	}
+	_, err := w.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectPath),
+	})
+
+	var nsk *types.NoSuchKey
+	if err != nil && !errors.As(err, &nsk) {
+		return fmt.Errorf("failed to delete S3 object: %w", err)
+	}
+	return nil
+}
+
+func (w *UniversalIOWriter) deleteLocal(path string) error {
+	err := os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete local file: %w", err)
+	}
 	return nil
 }

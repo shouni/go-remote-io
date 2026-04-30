@@ -46,13 +46,33 @@ type Lister interface {
 	List(ctx context.Context, path string, callback func(path string) error) error
 }
 
+// Remover は、リソースの削除機能に特化します。
+type Remover interface {
+	// Delete は、指定された path のリソース（GCS/S3/ローカル）を削除します。
+	Delete(ctx context.Context, path string) error
+}
+
+// StatReader は、リソースのメタデータや存在確認を行う機能を提供します。
+type StatReader interface {
+	// Exists は、指定された path にリソースが存在するかどうかを確認します。
+	Exists(ctx context.Context, path string) (bool, error)
+}
+
+// Manager は、リソースの管理（削除、存在確認など）を行うための複合インターフェースです。
+type Manager interface {
+	Remover
+	StatReader
+}
+
 // InputReader は、ローカルファイルパスまたはリモートURIから読み取りストリームを開き、一覧を取得するためのインターフェースを定義します。
 type InputReader interface {
 	Reader
 	Lister
+	StatReader
 }
 
 // OutputWriter は書き込みに関する複合インターフェース
 type OutputWriter interface {
 	Writer
+	Remover
 }

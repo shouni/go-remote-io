@@ -2,6 +2,7 @@ package remoteio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -162,5 +163,63 @@ func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, conte
 	}
 
 	slog.Info("ローカル書き込み処理完了", slog.String("path", path))
+	return nil
+}
+
+// Delete はパスに応じて適切なストレージからリソースを削除します。
+func (w *UniversalIOWriter) Delete(ctx context.Context, path string) error {
+	if IsGCSURI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
+		if err != nil {
+			return fmt.Errorf("GCS URIのパース失敗: %w", err)
+		}
+		return w.deleteGCS(ctx, bucketName, objectPath)
+	}
+
+	if IsS3URI(path) {
+		bucketName, objectPath, err := ParseRemoteURI(path)
+		if err != nil {
+			return fmt.Errorf("S3 URIのパース失敗: %w", err)
+		}
+		return w.deleteS3(ctx, bucketName, objectPath)
+	}
+
+	return w.deleteLocal(path)
+}
+
+// deleteGCS は、GCSからリソースを削除します。
+func (w *UniversalIOWriter) deleteGCS(ctx context.Context, bucketName, objectPath string) error {
+	if w.gcsClient == nil {
+		return errors.New("GCSクライアントが未初期化です")
+	}
+	err := w.gcsClient.Bucket(bucketName).Object(objectPath).Delete(ctx)
+	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return fmt.Errorf("GCSオブジェクトの削除に失敗しました: %w", err)
+	}
+	return nil
+}
+
+// deleteS3 は、S3からリソースを削除します。
+func (w *UniversalIOWriter) deleteS3(ctx context.Context, bucketName, objectPath string) error {
+	if w.s3Client == nil {
+		return errors.New("S3クライアントが未初期化です")
+	}
+	_, err := w.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectPath),
+	})
+
+	if err != nil {
+		return fmt.Errorf("S3オブジェクトの削除に失敗しました: %w", err)
+	}
+	return nil
+}
+
+// deleteLocal は、ローカルファイルを削除します。
+func (w *UniversalIOWriter) deleteLocal(path string) error {
+	err := os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("ローカルファイルの削除に失敗しました: %w", err)
+	}
 	return nil
 }

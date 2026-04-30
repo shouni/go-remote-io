@@ -77,13 +77,13 @@ func TestUniversalIOWriter_Dispatch_Dispatch(t *testing.T) {
 			name:        "Delete GCS - client error",
 			uri:         "gs://my-bucket/obj",
 			op:          "Delete",
-			expectedErr: "gcs client is not initialized",
+			expectedErr: "GCSクライアントが未初期化です",
 		},
 		{
 			name:        "Delete S3 - client error",
 			uri:         "s3://my-bucket/obj",
 			op:          "Delete",
-			expectedErr: "s3 client is not initialized",
+			expectedErr: "S3クライアントが未初期化です",
 		},
 	}
 

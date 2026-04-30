@@ -12,7 +12,6 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 const DefaultContentType = "text/plain; charset=utf-8"
@@ -210,8 +209,7 @@ func (w *UniversalIOWriter) deleteS3(ctx context.Context, bucketName, objectPath
 		Key:    aws.String(objectPath),
 	})
 
-	var nsk *types.NoSuchKey
-	if err != nil && !errors.As(err, &nsk) {
+	if err != nil {
 		return fmt.Errorf("S3オブジェクトの削除に失敗しました: %w", err)
 	}
 	return nil

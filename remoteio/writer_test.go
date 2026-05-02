@@ -56,7 +56,7 @@ func TestUniversalIOWriter_Local(t *testing.T) {
 }
 
 // 2. クラウドURIの振り分け（ディスパッチ）ロジックのテスト
-func TestUniversalIOWriter_Dispatch_Dispatch(t *testing.T) {
+func TestUniversalIOWriter_Dispatch(t *testing.T) {
 	ctx := context.Background()
 	writer := NewUniversalIOWriter(nil, nil)
 	content := bytes.NewReader([]byte("test content"))
@@ -72,6 +72,12 @@ func TestUniversalIOWriter_Dispatch_Dispatch(t *testing.T) {
 			uri:         "gs://my-bucket/obj",
 			op:          "Write",
 			expectedErr: "GCSクライアントが初期化されていません",
+		},
+		{
+			name:        "Write S3 - client error",
+			uri:         "s3://my-bucket/obj",
+			op:          "Write",
+			expectedErr: "S3クライアントが初期化されていません",
 		},
 		{
 			name:        "Delete GCS - client error",

@@ -28,7 +28,7 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および **
   * `OutputWriter`: 書き込み (`Write`)、削除 (`Delete`) を統合。
 * **署名付き URL (Signed URL) の生成**: GCS および S3 リソースに対して、期限付きの署名付き URL を生成できます。
 * **効率的なリスティング**: 一覧取得にはコールバック方式を採用しており、大量のオブジェクトに対してもメモリ消費を抑えながら処理できます。
-* **Factory ベースの設計**: `ReadWriteFactory` / `IOFactory` を通じて各機能へアクセスできるため、依存関係の差し替えやテスト用モックの導入がしやすい構成です。
+* **Factory ベースの設計**: `IOFactory` を通じて各機能へアクセスできるため、依存関係の差し替えやテスト用モックの導入がしやすい構成です。
 * **DI (Dependency Injection) フレンドリー**: ストレージクライアントや実装の生成責務を分離しやすく、環境ごとの設定変更やテストが容易です。
 
 ---
@@ -43,10 +43,16 @@ go-remote-io/
     ├── s3/               # S3 具象実装
     │   └── factory.go    # S3 クライアントの管理と初期化
     ├── interfaces.go     # IOFactory / InputReader / OutputWriter 等の定義
-    ├── reader.go         # UniversalInputReader (マルチプロトコル読み込み/存在確認)
-    ├── writer.go         # UniversalIOWriter (マルチプロトコル書き込み/削除)
+    ├── reader.go         # UniversalInputReader の振り分け
+    ├── reader_local.go   # ローカルファイルの読み込み/一覧/存在確認
+    ├── reader_gcs.go     # GCS の読み込み/一覧/存在確認
+    ├── reader_s3.go      # S3 の読み込み/一覧/存在確認
+    ├── writer.go         # UniversalIOWriter の振り分け
+    ├── writer_local.go   # ローカルファイルの書き込み/削除
+    ├── writer_gcs.go     # GCS の書き込み/削除
+    ├── writer_s3.go      # S3 の書き込み/削除
     ├── signer.go         # URLSigner (署名付きURL生成の抽象化)
-    └── util.go           # URIの判定・解析ユーティリティ
+    └── uri.go            # URIの判定・解析ユーティリティ
 ```
 
 ---
@@ -59,11 +65,11 @@ Go Remote IO は、SOLID原則に基づき、役割ごとに細分化された�
 | :--- | :--- | :--- |
 | **Reader** | `Open` | リソースを `io.ReadCloser` として開く |
 | **Writer** | `Write` | リソースへデータを書き込む |
-| **StatReader** | `Exists` | リソースの存在を確認する |
+| **Exister** | `Exists` | リソースの存在を確認する |
 | **Remover** | `Delete` | リソースを削除する |
 | **Lister** | `List` | 指定パス配下のリソースを一覧取得する |
 
-これらを組み合わせた **`InputReader`** (Reader + Lister + StatReader) および **`OutputWriter`** (Writer + Remover) を通じて、高レベルな操作を実現します。
+これらを組み合わせた **`InputReader`** (Reader + Lister + Exister) および **`OutputWriter`** (Writer + Remover) を通じて、高レベルな操作を実現します。
 
 ---
 

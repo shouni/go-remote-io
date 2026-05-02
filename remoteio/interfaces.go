@@ -6,16 +6,9 @@ import (
 	"time"
 )
 
-// ReadWriteFactory インターフェースの定義
-type ReadWriteFactory interface {
-	io.Closer
-	Reader() (Reader, error)
-	Writer() (Writer, error)
-}
-
-// IOFactory インターフェースの定義
+// IOFactory は、読み込み・書き込み・署名付きURL生成の各コンポーネントを提供します。
 type IOFactory interface {
-	ReadWriteFactory
+	io.Closer
 	InputReader() (InputReader, error)
 	OutputWriter() (OutputWriter, error)
 	URLSigner() (URLSigner, error)
@@ -41,7 +34,8 @@ type URLSigner interface {
 // Lister はリソースの一覧を取得する機能に特化します
 type Lister interface {
 	// List は、指定されたプレフィックス配下の各ファイルパスに対して callback を実行します。
-	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを処理し、再帰的な探索は行いません。
+	// GCS/S3 は指定 prefix に一致する全オブジェクトを返します。
+	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを返し、再帰的な探索は行いません。
 	// callback がエラーを返した場合、リスト処理は中断され、そのエラーが返されます。
 	List(ctx context.Context, path string, callback func(path string) error) error
 }
@@ -52,23 +46,17 @@ type Remover interface {
 	Delete(ctx context.Context, path string) error
 }
 
-// StatReader は、リソースのメタデータや存在確認を行う機能を提供します。
-type StatReader interface {
+// Exister は、リソースの存在確認を行う機能を提供します。
+type Exister interface {
 	// Exists は、指定された path にリソースが存在するかどうかを確認します。
 	Exists(ctx context.Context, path string) (bool, error)
-}
-
-// Manager は、リソースの管理（削除、存在確認など）を行うための複合インターフェースです。
-type Manager interface {
-	Remover
-	StatReader
 }
 
 // InputReader は、ローカルファイルパスまたはリモートURIから読み取りストリームを開き、一覧を取得するためのインターフェースを定義します。
 type InputReader interface {
 	Reader
 	Lister
-	StatReader
+	Exister
 }
 
 // OutputWriter は書き込みに関する複合インターフェース

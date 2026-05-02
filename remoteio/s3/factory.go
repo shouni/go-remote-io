@@ -17,6 +17,8 @@ type S3ClientFactory struct {
 	awsConfig aws.Config
 }
 
+var _ remoteio.IOFactory = (*S3ClientFactory)(nil)
+
 // New は新しい S3ClientFactory インスタンスを作成します。
 func New(ctx context.Context) (*S3ClientFactory, error) {
 	// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)

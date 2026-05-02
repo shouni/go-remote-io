@@ -14,6 +14,8 @@ type GCSClientFactory struct {
 	client *storage.Client
 }
 
+var _ remoteio.IOFactory = (*GCSClientFactory)(nil)
+
 // New は GCSClientFactory インスタンスを作成します。
 func New(ctx context.Context) (*GCSClientFactory, error) {
 	client, err := storage.NewClient(ctx)

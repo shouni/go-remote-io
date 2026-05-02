@@ -10,7 +10,6 @@ import (
 )
 
 func (w *UniversalIOWriter) writeLocal(ctx context.Context, path string, contentReader io.Reader) error {
-	_ = ctx
 	slog.Info("ローカル書き込み処理開始", slog.String("path", path))
 
 	outputDir := filepath.Dir(path)
@@ -26,20 +25,20 @@ func (w *UniversalIOWriter) writeLocal(ctx context.Context, path string, content
 		slog.Error("ローカルファイルの作成に失敗", slog.String("path", path), slog.String("error", err.Error()))
 		return fmt.Errorf("ローカルファイル(%s)の作成に失敗しました: %w", path, err)
 	}
-	defer file.Close()
 
 	if _, err := io.Copy(file, contentReader); err != nil {
+		file.Close()
 		slog.Error("ローカルファイルへのコンテンツ書き込み中にエラーが発生", slog.String("path", path), slog.String("error", err.Error()))
 		return fmt.Errorf("ローカルファイル(%s)へのコンテンツ書き込み中にエラーが発生しました: %w", path, err)
 	}
 
+	if err := file.Close(); err != nil {
+		slog.Error("ローカルファイルのクローズに失敗", slog.String("path", path), slog.String("error", err.Error()))
+		return fmt.Errorf("ローカルファイル(%s)のクローズに失敗しました: %w", path, err)
+	}
+
 	slog.Info("ローカル書き込み処理完了", slog.String("path", path))
 	return nil
-}
-
-// WriteToLocal はローカルファイルへの直接書き込みを行います。
-func (w *UniversalIOWriter) WriteToLocal(ctx context.Context, path string, contentReader io.Reader) error {
-	return w.writeLocal(ctx, path, contentReader)
 }
 
 func (w *UniversalIOWriter) deleteLocal(path string) error {

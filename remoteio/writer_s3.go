@@ -44,11 +44,6 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 	return nil
 }
 
-// WriteToS3 は S3 への直接書き込みを行います。
-func (w *UniversalIOWriter) WriteToS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
-	return w.writeS3(ctx, bucketName, objectPath, contentReader, contentType)
-}
-
 func (w *UniversalIOWriter) deleteS3(ctx context.Context, bucketName, objectPath string) error {
 	if w.s3Client == nil {
 		return errors.New("S3クライアントが未初期化です")

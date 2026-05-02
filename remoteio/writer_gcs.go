@@ -46,11 +46,6 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 	return nil
 }
 
-// WriteToGCS は GCS への直接書き込みを行います。
-func (w *UniversalIOWriter) WriteToGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
-	return w.writeGCS(ctx, bucketName, objectPath, contentReader, contentType)
-}
-
 func (w *UniversalIOWriter) deleteGCS(ctx context.Context, bucketName, objectPath string) error {
 	if w.gcsClient == nil {
 		return errors.New("GCSクライアントが未初期化です")

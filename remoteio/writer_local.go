@@ -26,15 +26,18 @@ func (w *UniversalIOWriter) writeLocal(ctx context.Context, path string, content
 		return fmt.Errorf("ローカルファイル(%s)の作成に失敗しました: %w", path, err)
 	}
 
-	if _, err := io.Copy(file, contentReader); err != nil {
-		file.Close()
+	// defer内でCloseとエラーハンドリングを統合
+	defer func() {
+		err = file.Close()
+		if err == nil && err != nil {
+			slog.Error("ローカルファイルのクローズに失敗", slog.String("path", path), slog.String("error", err.Error()))
+			err = fmt.Errorf("ローカルファイル(%s)のクローズに失敗しました: %w", path, err)
+		}
+	}()
+
+	if _, err = io.Copy(file, contentReader); err != nil {
 		slog.Error("ローカルファイルへのコンテンツ書き込み中にエラーが発生", slog.String("path", path), slog.String("error", err.Error()))
 		return fmt.Errorf("ローカルファイル(%s)へのコンテンツ書き込み中にエラーが発生しました: %w", path, err)
-	}
-
-	if err := file.Close(); err != nil {
-		slog.Error("ローカルファイルのクローズに失敗", slog.String("path", path), slog.String("error", err.Error()))
-		return fmt.Errorf("ローカルファイル(%s)のクローズに失敗しました: %w", path, err)
 	}
 
 	slog.Info("ローカル書き込み処理完了", slog.String("path", path))

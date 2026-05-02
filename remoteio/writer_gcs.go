@@ -31,15 +31,17 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 		wc.ContentType = contentType
 	}
 
+	defer func() {
+		err := wc.Close()
+		if err == nil && err != nil {
+			slog.Error("GCS Writerのクローズに失敗", slog.String("uri", targetURI), slog.String("error", err.Error()))
+			err = fmt.Errorf("GCS Writerのクローズに失敗しました (アップロード処理中のエラー): %w", err)
+		}
+	}()
+
 	if _, err := io.Copy(wc, contentReader); err != nil {
-		wc.Close()
 		slog.Error("GCSへのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
 		return fmt.Errorf("GCSへのコンテンツ書き込み中にエラーが発生しました: %w", err)
-	}
-
-	if err := wc.Close(); err != nil {
-		slog.Error("GCS Writerのクローズに失敗", slog.String("uri", targetURI), slog.String("error", err.Error()))
-		return fmt.Errorf("GCS Writerのクローズに失敗しました (アップロード処理中のエラー): %w", err)
 	}
 
 	slog.Info("GCS書き込み処理完了", slog.String("uri", targetURI))

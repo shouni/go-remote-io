@@ -8,7 +8,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/go-remote-io.svg)](https://pkg.go.dev/github.com/shouni/go-remote-io)
 [![Status](https://img.shields.io/badge/Status-Completed-brightgreen)](#)
 
-## 🚀 概要 (About) - マルチクラウド I/O インターフェース
+## 🚀 概要 (About) - ユニバーサル・クラウドI/O インターフェース
 
 Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および **ローカルファイルシステム**を、統一的なインターフェースで扱うための Go 言語製 I/O ライブラリです。
 
@@ -20,16 +20,15 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および **
 
 * **ユニバーサル I/O**: path に応じて、**GCS**、**S3**、**ローカルファイルシステム**へのアクセスを自動的に振り分けます。
 * **フル機能のリソース操作**: 単なる読み書きだけでなく、**リソースの存在確認 (Exists)** や **削除 (Delete)** も統一インターフェースでサポート。
+* **Functional Options による書き込み制御**: `Content-Type` や `Content-Disposition` を型安全かつ柔軟に指定可能。ブラウザでのインライン再生や強制ダウンロードの制御が容易です。
 * **プラグイン可能な実装**:
-  * **GCS サブパッケージ**: Google Cloud Storage 公式クライアントを利用した I/O 実装を提供します。
-  * **S3 サブパッケージ**: AWS SDK for Go v2 を利用した S3 向け I/O 実装を提供します。
+  * **GCS サブパッケージ**: Google Cloud Storage 公式クライアントを利用した I/O 実装。
+  * **S3 サブパッケージ**: AWS SDK for Go v2 を利用した S3 向け I/O 実装。
 * **統一されたインターフェース**:
   * `InputReader`: 読み込み (`Open`)、一覧取得 (`List`)、存在確認 (`Exists`) を統合。
   * `OutputWriter`: 書き込み (`Write`)、削除 (`Delete`) を統合。
 * **署名付き URL (Signed URL) の生成**: GCS および S3 リソースに対して、期限付きの署名付き URL を生成できます。
 * **効率的なリスティング**: 一覧取得にはコールバック方式を採用しており、大量のオブジェクトに対してもメモリ消費を抑えながら処理できます。
-* **Factory ベースの設計**: `IOFactory` を通じて各機能へアクセスできるため、依存関係の差し替えやテスト用モックの導入がしやすい構成です。
-* **DI (Dependency Injection) フレンドリー**: ストレージクライアントや実装の生成責務を分離しやすく、環境ごとの設定変更やテストが容易です。
 
 ---
 
@@ -47,6 +46,7 @@ go-remote-io/
     ├── reader_local.go   # ローカルファイルの読み込み/一覧/存在確認
     ├── reader_gcs.go     # GCS の読み込み/一覧/存在確認
     ├── reader_s3.go      # S3 の読み込み/一覧/存在確認
+    ├── write_options.go  # Functional Options (WithContentType, etc.) の定義
     ├── writer.go         # UniversalIOWriter の振り分け
     ├── writer_local.go   # ローカルファイルの書き込み/削除
     ├── writer_gcs.go     # GCS の書き込み/削除
@@ -59,7 +59,7 @@ go-remote-io/
 
 ## 🧩 主要インターフェース (Key Interfaces)
 
-Go Remote IO は、SOLID原則に基づき、役割ごとに細分化されたインターフェースを提供しています。
+Go Remote IO は、役割ごとに細分化されたインターフェースを提供しています。
 
 | インターフェース | メソッド | 説明 |
 | :--- | :--- | :--- |
@@ -86,5 +86,3 @@ Go Remote IO は、SOLID原則に基づき、役割ごとに細分化された�
 ### 📜 ライセンス (License)
 
 このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
-
----

@@ -23,15 +23,21 @@ func NewUniversalIOWriter(gcsClient *storage.Client, s3Client *s3.Client) *Unive
 	return &UniversalIOWriter{gcsClient: gcsClient, s3Client: s3Client}
 }
 
-// Write は OutputWriter インターフェースの汎用メソッドを実装します。
-// パスのプレフィックスを見て GCS、S3、またはローカルへ処理を委譲します。
-func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReader io.Reader, contentType string) error {
+// Write は、パスに応じて適切なストレージへデータを書き込みます。
+func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReader io.Reader, opts ...WriteOption) error {
+	cfg := &writeConfig{
+		contentType: DefaultContentType,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	if IsGCSURI(path) {
 		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {
 			return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
 		}
-		return w.writeGCS(ctx, bucketName, objectPath, contentReader, contentType)
+		return w.writeGCS(ctx, bucketName, objectPath, contentReader, cfg)
 	}
 
 	if IsS3URI(path) {
@@ -39,10 +45,10 @@ func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReade
 		if err != nil {
 			return fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
 		}
-		return w.writeS3(ctx, bucketName, objectPath, contentReader, contentType)
+		return w.writeS3(ctx, bucketName, objectPath, contentReader, cfg)
 	}
 
-	return w.writeLocal(ctx, path, contentReader)
+	return w.writeLocal(ctx, path, contentReader, cfg)
 }
 
 // Delete はパスに応じて適切なストレージからリソースを削除します。

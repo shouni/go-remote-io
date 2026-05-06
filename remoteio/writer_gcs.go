@@ -10,7 +10,8 @@ import (
 	"cloud.google.com/go/storage"
 )
 
-func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
+// writeGCS は、内部的に設定された writeConfig を使用して GCS に書き込みます。
+func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, cfg *writeConfig) error {
 	if bucketName == "" {
 		return fmt.Errorf("GCSへの書き込みに失敗しました: バケット名が空です")
 	}
@@ -22,13 +23,22 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 	}
 
 	targetURI := BuildGCSURI(bucketName, objectPath)
-	slog.Info("GCS書き込み処理開始", slog.String("uri", targetURI), slog.String("content_type", contentType))
+	slog.Info("GCS書き込み処理開始",
+		slog.String("uri", targetURI),
+		slog.String("content_type", cfg.contentType),
+		slog.String("disposition", cfg.contentDisposition),
+	)
 
 	wc := w.gcsClient.Bucket(bucketName).Object(objectPath).NewWriter(ctx)
-	if contentType == "" {
+
+	if cfg.contentType == "" {
 		wc.ContentType = DefaultContentType
 	} else {
-		wc.ContentType = contentType
+		wc.ContentType = cfg.contentType
+	}
+
+	if cfg.contentDisposition != "" {
+		wc.ContentDisposition = cfg.contentDisposition
 	}
 
 	if _, err := io.Copy(wc, contentReader); err != nil {

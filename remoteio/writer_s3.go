@@ -27,6 +27,7 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 		slog.String("uri", targetURI),
 		slog.String("content_type", cfg.contentType),
 		slog.String("disposition", cfg.contentDisposition),
+		slog.String("cache_control", cfg.cacheControl),
 	)
 
 	input := &s3.PutObjectInput{
@@ -38,6 +39,10 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 
 	if cfg.contentDisposition != "" {
 		input.ContentDisposition = aws.String(cfg.contentDisposition)
+	}
+
+	if cfg.cacheControl != "" {
+		input.CacheControl = aws.String(cfg.cacheControl)
 	}
 
 	_, err := w.s3Client.PutObject(ctx, input)

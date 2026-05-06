@@ -27,6 +27,7 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 		slog.String("uri", targetURI),
 		slog.String("content_type", cfg.contentType),
 		slog.String("disposition", cfg.contentDisposition),
+		slog.String("cache_control", cfg.cacheControl),
 	)
 
 	wc := w.gcsClient.Bucket(bucketName).Object(objectPath).NewWriter(ctx)
@@ -36,8 +37,12 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 		wc.ContentDisposition = cfg.contentDisposition
 	}
 
+	if cfg.cacheControl != "" {
+		wc.CacheControl = cfg.cacheControl
+	}
+
 	if _, err := io.Copy(wc, contentReader); err != nil {
-		wc.Close()
+		_ = wc.Close()
 		slog.Error("GCSへのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
 		return fmt.Errorf("GCSへのコンテンツ書き込み中にエラーが発生しました: %w", err)
 	}

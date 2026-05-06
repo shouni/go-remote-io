@@ -16,6 +16,7 @@ func (w *UniversalIOWriter) writeLocal(ctx context.Context, path string, content
 		slog.String("path", path),
 		slog.String("content_type", cfg.contentType),
 		slog.String("disposition", cfg.contentDisposition),
+		slog.String("cache_control", cfg.cacheControl),
 	)
 
 	outputDir := filepath.Dir(path)

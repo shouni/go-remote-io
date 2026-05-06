@@ -22,12 +22,17 @@ func TestUniversalIOWriter_Local(t *testing.T) {
 
 	targetPath := filepath.Join(tmpDir, "sub/dir/test.txt")
 
-	t.Run("success writing to local file and directory creation", func(t *testing.T) {
-		content := "Hello, Local IO!"
+	t.Run("success writing to local file with all options", func(t *testing.T) {
+		content := "Hello, Local IO with Cache!"
 		reader := bytes.NewReader([]byte(content))
 
-		err := writer.Write(ctx, targetPath, reader, WithContentType("text/plain"), WithInline())
-		require.NoError(t, err)
+		// CacheControl を含めたすべてのオプションを渡して、パニックやエラーが起きないことを確認
+		err := writer.Write(ctx, targetPath, reader,
+			WithContentType("text/plain"),
+			WithInline(),
+			WithCacheControl("public, max-age=31536000, immutable"),
+		)
+		require.NoError(t, err, "オプションを指定してもローカル書き込みは成功すべきです")
 
 		got, err := os.ReadFile(targetPath)
 		require.NoError(t, err)
@@ -65,18 +70,21 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 		name        string
 		uri         string
 		op          string // "Write" or "Delete"
+		withCache   bool   // CacheControl オプションを付与するか
 		expectedErr string
 	}{
 		{
-			name:        "Write GCS - client error",
+			name:        "Write GCS - client error with cache option",
 			uri:         "gs://my-bucket/obj",
 			op:          "Write",
+			withCache:   true,
 			expectedErr: "GCSクライアントが初期化されていません",
 		},
 		{
-			name:        "Write S3 - client error",
+			name:        "Write S3 - client error with cache option",
 			uri:         "s3://my-bucket/obj",
 			op:          "Write",
+			withCache:   true,
 			expectedErr: "S3クライアントが初期化されていません",
 		},
 		{
@@ -91,24 +99,40 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 			op:          "Delete",
 			expectedErr: "S3クライアントが未初期化です",
 		},
+		{
+			name:        "Write Local - Invalid path",
+			uri:         "/", // ルートディレクトリへの書き込み試行
+			op:          "Write",
+			expectedErr: "is a directory", // OS依存だがエラーになることを確認
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var err error
 			if tt.op == "Write" {
-				err = writer.Write(ctx, tt.uri, content, WithContentType("text/plain"))
+				opts := []WriteOption{WithContentType("text/plain")}
+				if tt.withCache {
+					opts = append(opts, WithCacheControl("public, max-age=3600"))
+				}
+				err = writer.Write(ctx, tt.uri, content, opts...)
 			} else {
 				err = writer.Delete(ctx, tt.uri)
 			}
+
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.expectedErr)
+			// ローカルパスで "/" を指定した際などは環境によってエラー内容が異なる可能性があるため
+			// クラウドURIの場合のみ詳細なメッセージを確認
+			if IsGCSURI(tt.uri) || IsS3URI(tt.uri) {
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
 		})
 	}
 }
 
 // 3. インターフェース満足度のテスト
 func TestOutputWriter_InterfaceSatisfaction(t *testing.T) {
+	// 定義したインターフェースを UniversalIOWriter が満たしているかコンパイル時にチェック
 	var _ Writer = (*UniversalIOWriter)(nil)
 	var _ Remover = (*UniversalIOWriter)(nil)
 	var _ OutputWriter = (*UniversalIOWriter)(nil)

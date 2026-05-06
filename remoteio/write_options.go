@@ -5,6 +5,7 @@ import "mime"
 // writeConfig は内部的な設定値を保持する構造体
 type writeConfig struct {
 	contentType        string
+	cacheControl       string
 	contentDisposition string
 }
 
@@ -15,6 +16,13 @@ type WriteOption func(*writeConfig)
 func WithContentType(contentType string) WriteOption {
 	return func(c *writeConfig) {
 		c.contentType = contentType
+	}
+}
+
+// WithCacheControl は Cache-Control ヘッダーを指定する
+func WithCacheControl(cacheControl string) WriteOption {
+	return func(c *writeConfig) {
+		c.cacheControl = cacheControl
 	}
 }
 

@@ -30,12 +30,7 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 	)
 
 	wc := w.gcsClient.Bucket(bucketName).Object(objectPath).NewWriter(ctx)
-
-	if cfg.contentType == "" {
-		wc.ContentType = DefaultContentType
-	} else {
-		wc.ContentType = cfg.contentType
-	}
+	wc.ContentType = cfg.contentType
 
 	if cfg.contentDisposition != "" {
 		wc.ContentDisposition = cfg.contentDisposition

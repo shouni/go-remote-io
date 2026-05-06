@@ -10,6 +10,7 @@ import (
 )
 
 // writeLocal はローカルファイルシステムに書き込みます。
+// 注意: ローカルファイルシステムでは ContentType や ContentDisposition などのメタデータは保存されず、無視されます。
 func (w *UniversalIOWriter) writeLocal(ctx context.Context, path string, contentReader io.Reader, cfg *writeConfig) error {
 	slog.Info("ローカル書き込み処理開始",
 		slog.String("path", path),

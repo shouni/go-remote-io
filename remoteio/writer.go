@@ -32,6 +32,11 @@ func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReade
 		opt(cfg)
 	}
 
+	// 明示的に空文字が渡された場合のフォールバックを一元管理
+	if cfg.contentType == "" {
+		cfg.contentType = DefaultContentType
+	}
+
 	if IsGCSURI(path) {
 		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {

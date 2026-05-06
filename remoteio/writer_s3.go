@@ -29,16 +29,11 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 		slog.String("disposition", cfg.contentDisposition),
 	)
 
-	contentType := cfg.contentType
-	if contentType == "" {
-		contentType = DefaultContentType
-	}
-
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(objectPath),
 		Body:        contentReader,
-		ContentType: aws.String(contentType),
+		ContentType: aws.String(cfg.contentType),
 	}
 
 	if cfg.contentDisposition != "" {

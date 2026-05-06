@@ -1,5 +1,7 @@
 package remoteio
 
+import "mime"
+
 // writeConfig は内部的な設定値を保持する構造体
 type writeConfig struct {
 	contentType        string
@@ -27,7 +29,7 @@ func WithInline() WriteOption {
 func WithAttachment(filename string) WriteOption {
 	return func(c *writeConfig) {
 		if filename != "" {
-			c.contentDisposition = "attachment; filename=" + filename
+			c.contentDisposition = mime.FormatMediaType("attachment", map[string]string{"filename": filename})
 		} else {
 			c.contentDisposition = "attachment"
 		}

@@ -120,10 +120,10 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 				err = writer.Delete(ctx, tt.uri)
 			}
 
+			require.Error(t, err)
 			// ローカルパスで "/" を指定した際などは環境によってエラー内容が異なる可能性があるため
 			// クラウドURIの場合のみ詳細なメッセージを確認
 			if IsGCSURI(tt.uri) || IsS3URI(tt.uri) {
-				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
 		})

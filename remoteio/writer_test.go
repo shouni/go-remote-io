@@ -26,7 +26,7 @@ func TestUniversalIOWriter_Local(t *testing.T) {
 		content := "Hello, Local IO!"
 		reader := bytes.NewReader([]byte(content))
 
-		err := writer.Write(ctx, targetPath, reader, "text/plain")
+		err := writer.Write(ctx, targetPath, reader, WithContentType("text/plain"), WithInline())
 		require.NoError(t, err)
 
 		got, err := os.ReadFile(targetPath)
@@ -97,7 +97,7 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var err error
 			if tt.op == "Write" {
-				err = writer.Write(ctx, tt.uri, content, "text/plain")
+				err = writer.Write(ctx, tt.uri, content, WithContentType("text/plain"))
 			} else {
 				err = writer.Delete(ctx, tt.uri)
 			}

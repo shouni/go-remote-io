@@ -23,7 +23,7 @@ type Reader interface {
 // Writer は単一のリソースを書き込む機能に特化します
 type Writer interface {
 	// Write は、指定された path に応じて GCS、S3、またはローカルファイルへデータを書き込みます。
-	Write(ctx context.Context, path string, contentReader io.Reader, contentType string) error
+	Write(ctx context.Context, path string, contentReader io.Reader, opts ...WriteOption) error
 }
 
 // URLSigner は、リモートストレージの署名付きURLを生成する機能を提供します。

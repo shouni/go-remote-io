@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, contentType string) error {
+func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath string, contentReader io.Reader, cfg *writeConfig) error {
 	if bucketName == "" {
 		return fmt.Errorf("S3への書き込みに失敗しました: バケット名が空です")
 	}
@@ -23,18 +23,24 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 	}
 
 	targetURI := BuildS3URI(bucketName, objectPath)
-	slog.Info("S3書き込み処理開始", slog.String("uri", targetURI), slog.String("content_type", contentType))
+	slog.Info("S3書き込み処理開始",
+		slog.String("uri", targetURI),
+		slog.String("content_type", cfg.contentType),
+		slog.String("disposition", cfg.contentDisposition),
+	)
 
-	if contentType == "" {
-		contentType = DefaultContentType
-	}
-
-	_, err := w.s3Client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(objectPath),
 		Body:        contentReader,
-		ContentType: aws.String(contentType),
-	})
+		ContentType: aws.String(cfg.contentType),
+	}
+
+	if cfg.contentDisposition != "" {
+		input.ContentDisposition = aws.String(cfg.contentDisposition)
+	}
+
+	_, err := w.s3Client.PutObject(ctx, input)
 	if err != nil {
 		slog.Error("S3へのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
 		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました: %w", err)

@@ -58,6 +58,20 @@ func TestUniversalIOWriter_Local(t *testing.T) {
 		err := writer.Delete(ctx, nonExistentPath)
 		assert.NoError(t, err, "削除対象がなくてもエラーを返すべきではありません")
 	})
+
+	t.Run("write is cancelled when context is already done", func(t *testing.T) {
+		cancelledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		cancelledPath := filepath.Join(tmpDir, "cancelled.txt")
+		reader := bytes.NewReader([]byte("should not be written"))
+
+		err := writer.Write(cancelledCtx, cancelledPath, reader)
+		require.ErrorIs(t, err, context.Canceled)
+
+		_, statErr := os.Stat(cancelledPath)
+		assert.True(t, os.IsNotExist(statErr), "キャンセル済みcontextではファイルを作成すべきではありません")
+	})
 }
 
 // 2. クラウドURIの振り分け（ディスパッチ）ロジックのテスト

@@ -86,8 +86,10 @@ func (r *UniversalInputReader) existsS3(ctx context.Context, s3URI string) (bool
 		return true, nil
 	}
 
-	var nf *types.NotFound
-	if _, ok := errors.AsType[*types.NoSuchKey](err); ok || errors.As(err, &nf) {
+	if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
+		return false, nil
+	}
+	if _, ok := errors.AsType[*types.NotFound](err); ok {
 		return false, nil
 	}
 

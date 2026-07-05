@@ -20,7 +20,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 	// テスト用の一時ディレクトリを作成
 	tmpDir, err := os.MkdirTemp("", "remoteio_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	content := "Hello, InputReader!"
 	tmpFile := filepath.Join(tmpDir, "test.txt")
@@ -61,7 +61,7 @@ func TestUniversalInputReader_Local(t *testing.T) {
 	t.Run("List: stops and returns callback error", func(t *testing.T) {
 		expectedErr := errors.New("stop listing")
 
-		err := reader.List(ctx, tmpDir, func(path string) error {
+		err := reader.List(ctx, tmpDir, func(_ string) error {
 			return expectedErr
 		})
 
@@ -156,7 +156,7 @@ func TestUniversalInputReader_DispatchAndValidation(t *testing.T) {
 }
 
 // 3. インターフェース満足度のテスト
-func TestInputReader_InterfaceSatisfaction(t *testing.T) {
+func TestInputReader_InterfaceSatisfaction(_ *testing.T) {
 	var _ Reader = (*UniversalInputReader)(nil)
 	var _ Lister = (*UniversalInputReader)(nil)
 	var _ Exister = (*UniversalInputReader)(nil)

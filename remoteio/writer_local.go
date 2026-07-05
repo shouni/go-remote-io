@@ -38,7 +38,7 @@ func (w *UniversalIOWriter) writeLocal(ctx context.Context, path string, content
 	}
 
 	if _, err := io.Copy(file, &ctxReader{ctx: ctx, r: contentReader}); err != nil {
-		file.Close()
+		_ = file.Close()
 		slog.Error("ローカルファイルへのコンテンツ書き込み中にエラーが発生", slog.String("path", path), slog.String("error", err.Error()))
 		return fmt.Errorf("ローカルファイル(%s)へのコンテンツ書き込み中にエラーが発生しました: %w", path, err)
 	}

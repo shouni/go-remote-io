@@ -6,16 +6,32 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2/google"
 )
 
-func TestGCSClientFactory_New(t *testing.T) {
+// skipWithoutGCPCredentials は、GCP Application Default Credentials が
+// 利用できない環境（CIランナーなど）でこのテストをスキップします。
+// storage.NewClient は ADC を必須とするため、認証情報がない環境では
+// ここでスキップしないと必ず失敗します。
+func skipWithoutGCPCredentials(t *testing.T) {
+	t.Helper()
+	if _, err := google.FindDefaultCredentials(context.Background()); err != nil {
+		t.Skipf("GCP Application Default Credentials が見つからないため、このテストをスキップします: %v", err)
+	}
+}
+
+func TestClientFactory_New(t *testing.T) {
+	skipWithoutGCPCredentials(t)
+
 	f, err := New(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, f)
 	require.NotNil(t, f.client)
 }
 
-func TestGCSClientFactory_Accessors(t *testing.T) {
+func TestClientFactory_Accessors(t *testing.T) {
+	skipWithoutGCPCredentials(t)
+
 	f, err := New(context.Background())
 	require.NoError(t, err)
 
@@ -50,7 +66,9 @@ func TestGCSClientFactory_Accessors(t *testing.T) {
 	})
 }
 
-func TestGCSClientFactory_Close(t *testing.T) {
+func TestClientFactory_Close(t *testing.T) {
+	skipWithoutGCPCredentials(t)
+
 	f, err := New(context.Background())
 	require.NoError(t, err)
 

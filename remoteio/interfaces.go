@@ -1,3 +1,5 @@
+// Package remoteio は、ローカルファイル・GCS・S3 を透過的に扱うための
+// 読み込み・書き込み・署名付きURL生成のインターフェースと実装を提供します。
 package remoteio
 
 import (

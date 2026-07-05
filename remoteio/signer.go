@@ -25,7 +25,7 @@ func NewGCSURLSigner(client *storage.Client) URLSigner {
 }
 
 // GenerateSignedURL は GCS URI に対応する署名付きURLを生成します。
-func (s *gcsURLSigner) GenerateSignedURL(ctx context.Context, path string, method string, expires time.Duration) (string, error) {
+func (s *gcsURLSigner) GenerateSignedURL(_ context.Context, path string, method string, expires time.Duration) (string, error) {
 	// クライアントの初期化チェック
 	if s.client == nil {
 		return "", fmt.Errorf("GCSクライアントが初期化されていないため、署名付きURLを生成できません")

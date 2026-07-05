@@ -38,7 +38,7 @@ func TestS3URLSigner_Validation(t *testing.T) {
 }
 
 // 3. インターフェース満足度のテスト
-func TestURLSigner_InterfaceSatisfaction(t *testing.T) {
+func TestURLSigner_InterfaceSatisfaction(_ *testing.T) {
 	var _ URLSigner = (*gcsURLSigner)(nil)
 	var _ URLSigner = (*s3URLSigner)(nil)
 }

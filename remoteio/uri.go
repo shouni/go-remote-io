@@ -6,8 +6,10 @@ import (
 )
 
 const (
+	// PrefixGCS は Google Cloud Storage の URI スキームプレフィックスです。
 	PrefixGCS = "gs://"
-	PrefixS3  = "s3://"
+	// PrefixS3 は Amazon S3 の URI スキームプレフィックスです。
+	PrefixS3 = "s3://"
 )
 
 // IsRemoteURI は対応しているいずれかのスキームであれば true を返します

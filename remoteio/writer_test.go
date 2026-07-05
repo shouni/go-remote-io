@@ -18,7 +18,7 @@ func TestUniversalIOWriter_Local(t *testing.T) {
 
 	tmpDir, err := os.MkdirTemp("", "remoteio_writer_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	targetPath := filepath.Join(tmpDir, "sub/dir/test.txt")
 
@@ -145,7 +145,7 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 }
 
 // 3. インターフェース満足度のテスト
-func TestOutputWriter_InterfaceSatisfaction(t *testing.T) {
+func TestOutputWriter_InterfaceSatisfaction(_ *testing.T) {
 	// 定義したインターフェースを UniversalIOWriter が満たしているかコンパイル時にチェック
 	var _ Writer = (*UniversalIOWriter)(nil)
 	var _ Remover = (*UniversalIOWriter)(nil)

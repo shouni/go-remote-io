@@ -8,14 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestS3ClientFactory_New(t *testing.T) {
+func TestClientFactory_New(t *testing.T) {
 	f, err := New(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, f)
 	require.NotNil(t, f.client)
 }
 
-func TestS3ClientFactory_DefaultRegion(t *testing.T) {
+func TestClientFactory_DefaultRegion(t *testing.T) {
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 
@@ -24,7 +24,7 @@ func TestS3ClientFactory_DefaultRegion(t *testing.T) {
 	assert.Equal(t, "ap-northeast-1", f.awsConfig.Region, "リージョン未設定時はデフォルトリージョンが適用されるべきです")
 }
 
-func TestS3ClientFactory_Accessors(t *testing.T) {
+func TestClientFactory_Accessors(t *testing.T) {
 	f, err := New(context.Background())
 	require.NoError(t, err)
 
@@ -59,7 +59,7 @@ func TestS3ClientFactory_Accessors(t *testing.T) {
 	})
 }
 
-func TestS3ClientFactory_Close(t *testing.T) {
+func TestClientFactory_Close(t *testing.T) {
 	f, err := New(context.Background())
 	require.NoError(t, err)
 

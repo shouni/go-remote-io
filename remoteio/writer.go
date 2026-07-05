@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// DefaultContentType は、Content-Type が指定されなかった場合に使用されるデフォルト値です。
 const DefaultContentType = "text/plain; charset=utf-8"
 
 // UniversalIOWriter は GCSOutputWriter, S3OutputWriter, LocalOutputWriter のすべてを満たす具象型です。

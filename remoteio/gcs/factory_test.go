@@ -8,14 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGCSClientFactory_New(t *testing.T) {
+func TestClientFactory_New(t *testing.T) {
 	f, err := New(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, f)
 	require.NotNil(t, f.client)
 }
 
-func TestGCSClientFactory_Accessors(t *testing.T) {
+func TestClientFactory_Accessors(t *testing.T) {
 	f, err := New(context.Background())
 	require.NoError(t, err)
 
@@ -50,7 +50,7 @@ func TestGCSClientFactory_Accessors(t *testing.T) {
 	})
 }
 
-func TestGCSClientFactory_Close(t *testing.T) {
+func TestClientFactory_Close(t *testing.T) {
 	f, err := New(context.Background())
 	require.NoError(t, err)
 

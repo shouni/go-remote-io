@@ -39,7 +39,10 @@ type Lister interface {
 	// GCS/S3 は指定 prefix に一致する全オブジェクトを返します。
 	// ローカルパスの場合、指定されたディレクトリ直下のファイルのみを返し、再帰的な探索は行いません。
 	// callback がエラーを返した場合、リスト処理は中断され、そのエラーが返されます。
-	List(ctx context.Context, path string, callback func(path string) error) error
+	//
+	// WithDelimiter を渡すと prefix 直下のみが対象になり、疑似ディレクトリが
+	// 区切り文字で終わる URI として併せて列挙されます。
+	List(ctx context.Context, path string, callback func(path string) error, opts ...ListOption) error
 }
 
 // Remover は、リソースの削除機能に特化します。

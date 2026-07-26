@@ -38,42 +38,40 @@ func (w *UniversalIOWriter) Write(ctx context.Context, path string, contentReade
 		cfg.contentType = DefaultContentType
 	}
 
-	if IsGCSURI(path) {
+	return dispatchRemote(path,
+		func(bucket, object string) error {
+			return w.writeGCS(ctx, bucket, object, contentReader, cfg)
+		},
+		func(bucket, object string) error {
+			return w.writeS3(ctx, bucket, object, contentReader, cfg)
+		},
+		func() error { return w.writeLocal(ctx, path, contentReader, cfg) },
+	)
+}
+
+// dispatchRemote は URI スキームを見て GCS / S3 / ローカルのいずれかへ処理を振り分けます。
+//
+// Write と Delete がまったく同じ形の分岐を持っていたため、片方だけ直すと挙動がずれます。
+// パースの失敗メッセージもここで一本化します。
+func dispatchRemote(path string, gcs, s3 func(bucket, object string) error, local func() error) error {
+	if IsGCSURI(path) || IsS3URI(path) {
 		bucketName, objectPath, err := ParseRemoteURI(path)
 		if err != nil {
-			return fmt.Errorf("GCS URIのパースに失敗しました: %w", err)
+			return fmt.Errorf("URIのパースに失敗しました (%s): %w", path, err)
 		}
-		return w.writeGCS(ctx, bucketName, objectPath, contentReader, cfg)
-	}
-
-	if IsS3URI(path) {
-		bucketName, objectPath, err := ParseRemoteURI(path)
-		if err != nil {
-			return fmt.Errorf("S3 URIのパースに失敗しました: %w", err)
+		if IsGCSURI(path) {
+			return gcs(bucketName, objectPath)
 		}
-		return w.writeS3(ctx, bucketName, objectPath, contentReader, cfg)
+		return s3(bucketName, objectPath)
 	}
-
-	return w.writeLocal(ctx, path, contentReader, cfg)
+	return local()
 }
 
 // Delete はパスに応じて適切なストレージからリソースを削除します。
 func (w *UniversalIOWriter) Delete(ctx context.Context, path string) error {
-	if IsGCSURI(path) {
-		bucketName, objectPath, err := ParseRemoteURI(path)
-		if err != nil {
-			return fmt.Errorf("GCS URIのパース失敗: %w", err)
-		}
-		return w.deleteGCS(ctx, bucketName, objectPath)
-	}
-
-	if IsS3URI(path) {
-		bucketName, objectPath, err := ParseRemoteURI(path)
-		if err != nil {
-			return fmt.Errorf("S3 URIのパース失敗: %w", err)
-		}
-		return w.deleteS3(ctx, bucketName, objectPath)
-	}
-
-	return w.deleteLocal(path)
+	return dispatchRemote(path,
+		func(bucket, object string) error { return w.deleteGCS(ctx, bucket, object) },
+		func(bucket, object string) error { return w.deleteS3(ctx, bucket, object) },
+		func() error { return w.deleteLocal(path) },
+	)
 }

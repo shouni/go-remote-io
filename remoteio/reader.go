@@ -36,15 +36,17 @@ func (r *UniversalInputReader) Open(ctx context.Context, path string) (io.ReadCl
 }
 
 // List は指定された path に応じたリソース一覧を取得し、コールバック関数に渡します。
-func (r *UniversalInputReader) List(ctx context.Context, path string, callback func(string) error) error {
+func (r *UniversalInputReader) List(ctx context.Context, path string, callback func(string) error, opts ...ListOption) error {
+	cfg := newListConfig(opts)
+
 	if IsGCSURI(path) {
-		return r.listGCS(ctx, path, callback)
+		return r.listGCS(ctx, path, callback, cfg)
 	}
 	if IsS3URI(path) {
-		return r.listS3(ctx, path, callback)
+		return r.listS3(ctx, path, callback, cfg)
 	}
 
-	return r.listLocal(path, callback)
+	return r.listLocal(path, callback, cfg)
 }
 
 // Exists は指定されたパスにリソース（GCS、S3、またはローカルファイル）が存在するかを確認します。

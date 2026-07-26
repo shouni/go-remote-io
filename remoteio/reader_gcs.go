@@ -33,7 +33,7 @@ func (r *UniversalInputReader) openGCS(ctx context.Context, gcsURI string) (io.R
 	return rc, nil
 }
 
-func (r *UniversalInputReader) listGCS(ctx context.Context, gcsURI string, callback func(string) error) error {
+func (r *UniversalInputReader) listGCS(ctx context.Context, gcsURI string, callback func(string) error, cfg *listConfig) error {
 	if r.gcsClient == nil {
 		return fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
@@ -41,21 +41,28 @@ func (r *UniversalInputReader) listGCS(ctx context.Context, gcsURI string, callb
 	if err != nil {
 		return err
 	}
+	prefix = listPrefix(prefix, cfg)
 
-	it := r.gcsClient.Bucket(bucketName).Objects(ctx, &storage.Query{Prefix: prefix})
+	query := &storage.Query{Prefix: prefix, Delimiter: cfg.delimiter}
+	it := r.gcsClient.Bucket(bucketName).Objects(ctx, query)
 	for {
 		attrs, err := it.Next()
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("GCSリスト取得失敗 (イテレーション中, URI: %s): %w", gcsURI, err)
 		}
-		if attrs.Name == prefix {
+
+		// 区切り文字を指定したとき、疑似ディレクトリは Name が空で Prefix に入ります。
+		name := attrs.Name
+		if name == "" {
+			name = attrs.Prefix
+		}
+		if name == "" || name == prefix {
 			continue
 		}
-		fullPath := BuildGCSURI(bucketName, attrs.Name)
-		if err := callback(fullPath); err != nil {
+		if err := callback(BuildGCSURI(bucketName, name)); err != nil {
 			return err
 		}
 	}
@@ -69,6 +76,11 @@ func (r *UniversalInputReader) existsGCS(ctx context.Context, gcsURI string) (bo
 	bucketName, objectName, err := ParseRemoteURI(gcsURI)
 	if err != nil {
 		return false, err
+	}
+	// バケット自体の存在確認と取り違えないよう、Open と同じ条件で弾きます。
+	// オブジェクト名が空のまま Attrs を引くと、不在なのかURIが不正なのか区別できません。
+	if objectName == "" {
+		return false, fmt.Errorf("オブジェクト名が空です: %s", gcsURI)
 	}
 
 	_, err = r.gcsClient.Bucket(bucketName).Object(objectName).Attrs(ctx)

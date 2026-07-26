@@ -23,7 +23,7 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 	}
 
 	targetURI := BuildGCSURI(bucketName, objectPath)
-	slog.Info("GCS書き込み処理開始",
+	slog.DebugContext(ctx, "GCS書き込み処理開始",
 		slog.String("uri", targetURI),
 		slog.String("content_type", cfg.contentType),
 		slog.String("disposition", cfg.contentDisposition),
@@ -43,16 +43,14 @@ func (w *UniversalIOWriter) writeGCS(ctx context.Context, bucketName, objectPath
 
 	if _, err := io.Copy(wc, contentReader); err != nil {
 		_ = wc.Close()
-		slog.Error("GCSへのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
-		return fmt.Errorf("GCSへのコンテンツ書き込み中にエラーが発生しました: %w", err)
+		return fmt.Errorf("GCSへのコンテンツ書き込み中にエラーが発生しました (URI: %s): %w", targetURI, err)
 	}
 
 	if err := wc.Close(); err != nil {
-		slog.Error("GCS Writerのクローズに失敗", slog.String("uri", targetURI), slog.String("error", err.Error()))
-		return fmt.Errorf("GCS Writerのクローズに失敗しました (アップロード処理中のエラー): %w", err)
+		return fmt.Errorf("GCS Writerのクローズに失敗しました (URI: %s, アップロード処理中のエラー): %w", targetURI, err)
 	}
 
-	slog.Info("GCS書き込み処理完了", slog.String("uri", targetURI))
+	slog.DebugContext(ctx, "GCS書き込み処理完了", slog.String("uri", targetURI))
 	return nil
 }
 

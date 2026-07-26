@@ -71,6 +71,32 @@ Go Remote IO は、役割ごとに細分化されたインターフェースを�
 
 これらを組み合わせた **`InputReader`** (Reader + Lister + Exister) および **`OutputWriter`** (Writer + Remover) を通じて、高レベルな操作を実現します。
 
+#### 階層を意識した一覧取得 (`WithDelimiter`)
+
+`List` に `WithDelimiter("/")` を渡すと、指定プレフィックスの**直下だけ**が対象になり、
+「疑似ディレクトリ」が区切り文字で終わる URI として併せて列挙されます。
+
+```go
+// gs://bucket/music/ 配下のジョブ ID を、成果物を全件走査せずに取得する
+err := reader.List(ctx, "gs://bucket/music", func(uri string) error {
+    // gs://bucket/music/20260501-abcd/  ← 疑似ディレクトリ（末尾が "/"）
+    // gs://bucket/music/README.md       ← 直下のオブジェクト
+    if strings.HasSuffix(uri, "/") {
+        jobIDs = append(jobIDs, path.Base(strings.TrimSuffix(uri, "/")))
+    }
+    return nil
+}, remoteio.WithDelimiter("/"))
+```
+
+1 ジョブが複数の成果物を持つレイアウトでは、区切り文字なしの一覧はその数だけオブジェクトを
+返すため、呼び出し側で重複を潰すことになります。`WithDelimiter` はその走査をサーバー側へ寄せます。
+
+プレフィックスに区切り文字が無い場合は自動で補われます（`music` → `music/`）。
+補わないと `music-archive/` まで一致してしまうためです。
+
+ローカルパスに対しても同じ意味で働き、区切り文字を指定したときだけディレクトリが列挙されます
+（指定しない場合の挙動は従来どおりファイルのみです）。
+
 ---
 
 ### 🛠️ 主要な依存関係 (Dependencies)

@@ -219,8 +219,22 @@ func TestListPrefixNormalization(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := listPrefix(tt.prefix, &listConfig{delimiter: tt.delimiter})
+			got := ListPrefix(tt.prefix, ListSettings{Delimiter: tt.delimiter})
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// TestListSettingsIsInterpretableByImplementors は、Lister を実装する側が
+// 受け取ったオプションを解釈できることを確かめます。
+//
+// 設定が非公開だと、インターフェース経由でオプションを受け取っておきながら中身を読む
+// 手段が無く、代替実装やテストのフェイクが区切り文字を無視するしかなくなります。
+func TestListSettingsIsInterpretableByImplementors(t *testing.T) {
+	t.Parallel()
+
+	// 実装側が受け取った opts をそのまま解決できることが要点です。
+	assert.Equal(t, "/", NewListSettings(WithDelimiter("/")).Delimiter)
+	assert.Empty(t, NewListSettings().Delimiter, "オプション無しでは再帰列挙のまま")
+	assert.Empty(t, NewListSettings(nil).Delimiter, "nil オプションで落ちてはいけない")
 }

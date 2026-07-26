@@ -33,7 +33,7 @@ func (r *UniversalInputReader) openGCS(ctx context.Context, gcsURI string) (io.R
 	return rc, nil
 }
 
-func (r *UniversalInputReader) listGCS(ctx context.Context, gcsURI string, callback func(string) error, cfg *listConfig) error {
+func (r *UniversalInputReader) listGCS(ctx context.Context, gcsURI string, callback func(string) error, settings ListSettings) error {
 	if r.gcsClient == nil {
 		return fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
@@ -41,9 +41,9 @@ func (r *UniversalInputReader) listGCS(ctx context.Context, gcsURI string, callb
 	if err != nil {
 		return err
 	}
-	prefix = listPrefix(prefix, cfg)
+	prefix = ListPrefix(prefix, settings)
 
-	query := &storage.Query{Prefix: prefix, Delimiter: cfg.delimiter}
+	query := &storage.Query{Prefix: prefix, Delimiter: settings.Delimiter}
 	it := r.gcsClient.Bucket(bucketName).Objects(ctx, query)
 	for {
 		attrs, err := it.Next()

@@ -37,7 +37,7 @@ func (r *UniversalInputReader) openS3(ctx context.Context, s3URI string) (io.Rea
 	return result.Body, nil
 }
 
-func (r *UniversalInputReader) listS3(ctx context.Context, s3URI string, callback func(string) error, cfg *listConfig) error {
+func (r *UniversalInputReader) listS3(ctx context.Context, s3URI string, callback func(string) error, settings ListSettings) error {
 	if r.s3Client == nil {
 		return fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
@@ -45,14 +45,14 @@ func (r *UniversalInputReader) listS3(ctx context.Context, s3URI string, callbac
 	if err != nil {
 		return err
 	}
-	prefix = listPrefix(prefix, cfg)
+	prefix = ListPrefix(prefix, settings)
 
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 		Prefix: aws.String(prefix),
 	}
-	if cfg.delimiter != "" {
-		input.Delimiter = aws.String(cfg.delimiter)
+	if settings.Delimiter != "" {
+		input.Delimiter = aws.String(settings.Delimiter)
 	}
 	paginator := s3.NewListObjectsV2Paginator(r.s3Client, input)
 

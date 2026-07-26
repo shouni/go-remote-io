@@ -94,6 +94,10 @@ err := reader.List(ctx, "gs://bucket/music", func(uri string) error {
 プレフィックスに区切り文字が無い場合は自動で補われます（`music` → `music/`）。
 補わないと `music-archive/` まで一致してしまうためです。
 
+`Lister` を自前で実装する場合（テストのフェイクを含む）は、受け取った `opts` を
+`remoteio.NewListSettings(opts...)` で解決すると本体と同じ設定が得られます。
+プレフィックスの正規化も `remoteio.ListPrefix` で再現できます。
+
 ローカルパスに対しても同じ意味で働き、区切り文字を指定したときだけディレクトリが列挙されます
 （指定しない場合の挙動は従来どおりファイルのみです）。
 

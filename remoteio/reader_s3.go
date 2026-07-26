@@ -37,7 +37,7 @@ func (r *UniversalInputReader) openS3(ctx context.Context, s3URI string) (io.Rea
 	return result.Body, nil
 }
 
-func (r *UniversalInputReader) listS3(ctx context.Context, s3URI string, callback func(string) error) error {
+func (r *UniversalInputReader) listS3(ctx context.Context, s3URI string, callback func(string) error, cfg *listConfig) error {
 	if r.s3Client == nil {
 		return fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
@@ -45,23 +45,36 @@ func (r *UniversalInputReader) listS3(ctx context.Context, s3URI string, callbac
 	if err != nil {
 		return err
 	}
+	prefix = listPrefix(prefix, cfg)
 
-	paginator := s3.NewListObjectsV2Paginator(r.s3Client, &s3.ListObjectsV2Input{
+	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 		Prefix: aws.String(prefix),
-	})
+	}
+	if cfg.delimiter != "" {
+		input.Delimiter = aws.String(cfg.delimiter)
+	}
+	paginator := s3.NewListObjectsV2Paginator(r.s3Client, input)
 
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
 		if err != nil {
 			return fmt.Errorf("S3リスト取得失敗 (ページネーション中, URI: %s): %w", s3URI, err)
 		}
-		for _, obj := range output.Contents {
-			if *obj.Key == prefix {
+		// 区切り文字を指定したとき、疑似ディレクトリは Contents ではなく CommonPrefixes に入ります。
+		for _, cp := range output.CommonPrefixes {
+			if cp.Prefix == nil || *cp.Prefix == prefix {
 				continue
 			}
-			fullPath := BuildS3URI(bucketName, *obj.Key)
-			if err := callback(fullPath); err != nil {
+			if err := callback(BuildS3URI(bucketName, *cp.Prefix)); err != nil {
+				return err
+			}
+		}
+		for _, obj := range output.Contents {
+			if obj.Key == nil || *obj.Key == prefix {
+				continue
+			}
+			if err := callback(BuildS3URI(bucketName, *obj.Key)); err != nil {
 				return err
 			}
 		}
@@ -76,6 +89,9 @@ func (r *UniversalInputReader) existsS3(ctx context.Context, s3URI string) (bool
 	bucketName, objectPath, err := ParseRemoteURI(s3URI)
 	if err != nil {
 		return false, err
+	}
+	if objectPath == "" {
+		return false, fmt.Errorf("オブジェクト名が空です: %s", s3URI)
 	}
 
 	_, err = r.s3Client.HeadObject(ctx, &s3.HeadObjectInput{

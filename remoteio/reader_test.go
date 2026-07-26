@@ -162,3 +162,65 @@ func TestInputReader_InterfaceSatisfaction(_ *testing.T) {
 	var _ Exister = (*UniversalInputReader)(nil)
 	var _ InputReader = (*UniversalInputReader)(nil)
 }
+
+// TestListWithDelimiterLocal は、区切り文字を指定したときだけディレクトリが
+// 列挙されることを確かめます。
+//
+// 既定の挙動を変えないことが要点です。ローカルの一覧は元からファイルだけを返しており、
+// そこにディレクトリが混ざると、既存の呼び出し側が拾う対象が黙って変わります。
+func TestListWithDelimiterLocal(t *testing.T) {
+	ctx := context.Background()
+	reader := NewUniversalInputReader(nil, nil)
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "top.txt"), []byte("x"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "job-1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "job-1", "inner.txt"), []byte("y"), 0o644))
+
+	collect := func(opts ...ListOption) []string {
+		var got []string
+		require.NoError(t, reader.List(ctx, tmpDir, func(p string) error {
+			got = append(got, p)
+			return nil
+		}, opts...))
+		return got
+	}
+
+	t.Run("区切り文字なしでは従来どおりファイルのみ", func(t *testing.T) {
+		assert.ElementsMatch(t, []string{filepath.Join(tmpDir, "top.txt")}, collect())
+	})
+
+	t.Run("区切り文字ありではディレクトリが末尾つきで併せて返る", func(t *testing.T) {
+		assert.ElementsMatch(t, []string{
+			filepath.Join(tmpDir, "top.txt"),
+			filepath.Join(tmpDir, "job-1") + "/",
+		}, collect(WithDelimiter("/")))
+	})
+}
+
+// TestListPrefixNormalization は、区切り文字を指定したときにプレフィックスへ
+// 区切り文字が補われることを確かめます。
+//
+// 補わないと `music` が `music-archive/` まで拾います。ディレクトリの中身を見る操作として
+// 使う以上、そこが曖昧だと呼び出し側が毎回自分で末尾を足すことになります。
+func TestListPrefixNormalization(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		prefix    string
+		delimiter string
+		want      string
+	}{
+		{name: "区切り文字なしは素通し", prefix: "music", delimiter: "", want: "music"},
+		{name: "末尾を補う", prefix: "music", delimiter: "/", want: "music/"},
+		{name: "既に末尾があれば重ねない", prefix: "music/", delimiter: "/", want: "music/"},
+		{name: "空プレフィックスはバケット直下なので素通し", prefix: "", delimiter: "/", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := listPrefix(tt.prefix, &listConfig{delimiter: tt.delimiter})
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

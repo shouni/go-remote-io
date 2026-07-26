@@ -15,17 +15,26 @@ func (r *UniversalInputReader) openLocal(path string) (io.ReadCloser, error) {
 	return file, nil
 }
 
-func (r *UniversalInputReader) listLocal(path string, callback func(string) error) error {
+func (r *UniversalInputReader) listLocal(path string, callback func(string) error, cfg *listConfig) error {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Errorf("ローカルディレクトリの読み込みに失敗しました (path: %s): %w", path, err)
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			fullPath := filepath.Join(path, entry.Name())
-			if err := callback(fullPath); err != nil {
+		if entry.IsDir() {
+			// 区切り文字の指定が無いときの挙動は据え置きです。ローカルの一覧は元から
+			// 直下のファイルだけを返しており、そこにディレクトリを混ぜると既存の
+			// 呼び出し側が拾うものが変わってしまいます。
+			if cfg.delimiter == "" {
+				continue
+			}
+			if err := callback(filepath.Join(path, entry.Name()) + cfg.delimiter); err != nil {
 				return err
 			}
+			continue
+		}
+		if err := callback(filepath.Join(path, entry.Name())); err != nil {
+			return err
 		}
 	}
 	return nil

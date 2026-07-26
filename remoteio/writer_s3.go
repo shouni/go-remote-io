@@ -23,7 +23,7 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 	}
 
 	targetURI := BuildS3URI(bucketName, objectPath)
-	slog.Info("S3書き込み処理開始",
+	slog.DebugContext(ctx, "S3書き込み処理開始",
 		slog.String("uri", targetURI),
 		slog.String("content_type", cfg.contentType),
 		slog.String("disposition", cfg.contentDisposition),
@@ -45,13 +45,11 @@ func (w *UniversalIOWriter) writeS3(ctx context.Context, bucketName, objectPath 
 		input.CacheControl = aws.String(cfg.cacheControl)
 	}
 
-	_, err := w.s3Client.PutObject(ctx, input)
-	if err != nil {
-		slog.Error("S3へのコンテンツ書き込み中にエラーが発生", slog.String("uri", targetURI), slog.String("error", err.Error()))
-		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました: %w", err)
+	if _, err := w.s3Client.PutObject(ctx, input); err != nil {
+		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました (URI: %s): %w", targetURI, err)
 	}
 
-	slog.Info("S3書き込み処理完了", slog.String("uri", targetURI))
+	slog.DebugContext(ctx, "S3書き込み処理完了", slog.String("uri", targetURI))
 	return nil
 }
 

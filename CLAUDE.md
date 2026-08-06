@@ -60,10 +60,10 @@ go test -run 'TestRouterLocal/List: stops and returns callback error' ./remoteio
 
 区切り文字を渡すと prefix 直下だけが対象になり、疑似ディレクトリが**区切り文字で終わる URI** として callback に渡されます。呼び出し側は末尾で判別します。実装上の要点:
 
-* prefix は `ListPrefix` で正規化される (`music` → `music/`)。正規化しないと `music-archive/` まで一致するため。
+* prefix は `ListPrefix` で正規化される (`data` → `data/`)。正規化しないと `data-archive/` まで一致するため。
 * GCS は疑似ディレクトリが `attrs.Name` 空 + `attrs.Prefix` に、S3 は `Contents` ではなく `CommonPrefixes` に入る。prefix 自身は除外する。
 * ローカルの一覧は、区切り文字ありなら直下のみ（ディレクトリを区切り文字付きで併せて返す）、区切り文字なしなら `filepath.WalkDir` で再帰的にファイルだけを返します。GCS / S3 が prefix 配下を再帰的に返すのに対しローカルだけ直下で止まると、同じ呼び出しがスキームによって別の意味になり、呼び出し側からその違いが見えないためです。
-* ただし**区切り文字なしの prefix は、GCS / S3 では素の文字列前方一致**です（`music` は `music-archive/` にも一致する）。`ListPrefix` の正規化は区切り文字を指定したときだけ働きます。ローカルはファイルシステムの性質上ディレクトリ単位の走査になるため、ここだけは意味が揃いません。
+* ただし**区切り文字なしの prefix は、GCS / S3 では素の文字列前方一致**です（`data` は `data-archive/` にも一致する）。`ListPrefix` の正規化は区切り文字を指定したときだけ働きます。ローカルはファイルシステムの性質上ディレクトリ単位の走査になるため、ここだけは意味が揃いません。
 
 ### エラーの約束事
 

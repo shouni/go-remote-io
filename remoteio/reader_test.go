@@ -178,8 +178,8 @@ func TestListWithDelimiterLocal(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "top.txt"), []byte("x"), 0o644))
-	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "job-1"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "job-1", "inner.txt"), []byte("y"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "dir-1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "dir-1", "inner.txt"), []byte("y"), 0o644))
 
 	collect := func(opts ...ListOption) []string {
 		var got []string
@@ -193,14 +193,14 @@ func TestListWithDelimiterLocal(t *testing.T) {
 	t.Run("区切り文字なしでは配下を再帰的に列挙する", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
 			filepath.Join(tmpDir, "top.txt"),
-			filepath.Join(tmpDir, "job-1", "inner.txt"),
+			filepath.Join(tmpDir, "dir-1", "inner.txt"),
 		}, collect())
 	})
 
 	t.Run("区切り文字ありでは直下のみ、ディレクトリは末尾つきで返る", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
 			filepath.Join(tmpDir, "top.txt"),
-			filepath.Join(tmpDir, "job-1") + "/",
+			filepath.Join(tmpDir, "dir-1") + "/",
 		}, collect(WithDelimiter("/")))
 	})
 }
@@ -208,7 +208,7 @@ func TestListWithDelimiterLocal(t *testing.T) {
 // TestListPrefixNormalization は、区切り文字を指定したときにプレフィックスへ
 // 区切り文字が補われることを確かめます。
 //
-// 補わないと `music` が `music-archive/` まで拾います。ディレクトリの中身を見る操作として
+// 補わないと `data` が `data-archive/` まで拾います。ディレクトリの中身を見る操作として
 // 使う以上、そこが曖昧だと呼び出し側が毎回自分で末尾を足すことになります。
 func TestListPrefixNormalization(t *testing.T) {
 	t.Parallel()
@@ -219,9 +219,9 @@ func TestListPrefixNormalization(t *testing.T) {
 		delimiter string
 		want      string
 	}{
-		{name: "区切り文字なしは素通し", prefix: "music", delimiter: "", want: "music"},
-		{name: "末尾を補う", prefix: "music", delimiter: "/", want: "music/"},
-		{name: "既に末尾があれば重ねない", prefix: "music/", delimiter: "/", want: "music/"},
+		{name: "区切り文字なしは素通し", prefix: "data", delimiter: "", want: "data"},
+		{name: "末尾を補う", prefix: "data", delimiter: "/", want: "data/"},
+		{name: "既に末尾があれば重ねない", prefix: "data/", delimiter: "/", want: "data/"},
 		{name: "空プレフィックスはバケット直下なので素通し", prefix: "", delimiter: "/", want: ""},
 	}
 	for _, tt := range tests {

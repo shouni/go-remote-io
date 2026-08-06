@@ -133,7 +133,7 @@ func TestSchemePrefix(t *testing.T) {
 		{name: "S3", path: "s3://bucket/obj", want: "s3://"},
 		{name: "未対応スキームもそのまま取り出す", path: "ftp://host/file", want: "ftp://"},
 		{name: "絶対パスは空", path: "/var/tmp/file.txt", want: ""},
-		{name: "相対パスは空", path: "music/song.mp3", want: ""},
+		{name: "相対パスは空", path: "data/file.txt", want: ""},
 		{name: "空文字は空", path: "", want: ""},
 		{name: "先頭が区切りなら空（スキーム名が無い）", path: "://bucket/obj", want: ""},
 	}

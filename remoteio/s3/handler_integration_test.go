@@ -66,10 +66,10 @@ func uri(name string) string { return remoteio.BuildS3URI(testBucket, name) }
 
 func TestHandlerOpen(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t, map[string]string{"music/song.txt": "hello s3"})
+	router := newTestRouter(t, map[string]string{"data/report.txt": "hello s3"})
 
 	t.Run("既存オブジェクトを読める", func(t *testing.T) {
-		rc, err := router.Open(ctx, uri("music/song.txt"))
+		rc, err := router.Open(ctx, uri("data/report.txt"))
 		require.NoError(t, err)
 		defer func() { _ = rc.Close() }()
 
@@ -81,7 +81,7 @@ func TestHandlerOpen(t *testing.T) {
 	// GCS 側と同じく os.ErrNotExist で判定できること。
 	// これが揃っていて初めてスキーム非依存に書けます。
 	t.Run("不在は os.ErrNotExist を包んで返す", func(t *testing.T) {
-		_, err := router.Open(ctx, uri("music/missing.txt"))
+		_, err := router.Open(ctx, uri("data/missing.txt"))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, os.ErrNotExist)
 	})
@@ -95,15 +95,15 @@ func TestHandlerOpen(t *testing.T) {
 
 func TestHandlerExists(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t, map[string]string{"music/song.txt": "x"})
+	router := newTestRouter(t, map[string]string{"data/report.txt": "x"})
 
-	exists, err := router.Exists(ctx, uri("music/song.txt"))
+	exists, err := router.Exists(ctx, uri("data/report.txt"))
 	require.NoError(t, err)
 	assert.True(t, exists)
 
 	// HeadObject は NoSuchKey ではなく NotFound を返すことがあり、
 	// 片方しか見ていないと不在が「エラー」になります。
-	exists, err = router.Exists(ctx, uri("music/missing.txt"))
+	exists, err = router.Exists(ctx, uri("data/missing.txt"))
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -111,7 +111,7 @@ func TestHandlerExists(t *testing.T) {
 func TestHandlerWriteAndDelete(t *testing.T) {
 	ctx := context.Background()
 	router := newTestRouter(t, nil)
-	target := uri("music/new.txt")
+	target := uri("data/new.txt")
 
 	require.NoError(t, router.Write(ctx, target, strings.NewReader("written"),
 		remoteio.WithContentType("text/plain"),
@@ -136,11 +136,11 @@ func TestHandlerWriteAndDelete(t *testing.T) {
 func TestHandlerList(t *testing.T) {
 	ctx := context.Background()
 	router := newTestRouter(t, map[string]string{
-		"music/README.md":         "a",
-		"music/job-1/audio.mp3":   "b",
-		"music/job-1/recipe.json": "c",
-		"music/job-2/audio.mp3":   "d",
-		"music-archive/old.txt":   "e",
+		"data/README.md":       "a",
+		"data/dir-1/a.txt":     "b",
+		"data/dir-1/b.txt":     "c",
+		"data/dir-2/a.txt":     "d",
+		"data-archive/old.txt": "e",
 	})
 
 	collect := func(prefix string, opts ...remoteio.ListOption) []string {
@@ -155,26 +155,26 @@ func TestHandlerList(t *testing.T) {
 	// 区切り文字なしの prefix は素の文字列前方一致です（GCS と同じ意味論）。
 	t.Run("区切り文字なしは文字列前方一致で再帰的に列挙する", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
-			uri("music/README.md"),
-			uri("music/job-1/audio.mp3"),
-			uri("music/job-1/recipe.json"),
-			uri("music/job-2/audio.mp3"),
-			uri("music-archive/old.txt"),
-		}, collect("music"))
+			uri("data/README.md"),
+			uri("data/dir-1/a.txt"),
+			uri("data/dir-1/b.txt"),
+			uri("data/dir-2/a.txt"),
+			uri("data-archive/old.txt"),
+		}, collect("data"))
 	})
 
 	// 疑似ディレクトリは Contents ではなく CommonPrefixes に入るため、
-	// そこを取り違えるとジョブ ID の一覧が丸ごと落ちます。
+	// そこを取り違えると疑似ディレクトリの一覧が丸ごと落ちます。
 	t.Run("区切り文字ありでは直下と疑似ディレクトリを返す", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
-			uri("music/README.md"),
-			uri("music/job-1/"),
-			uri("music/job-2/"),
-		}, collect("music", remoteio.WithDelimiter("/")))
+			uri("data/README.md"),
+			uri("data/dir-1/"),
+			uri("data/dir-2/"),
+		}, collect("data", remoteio.WithDelimiter("/")))
 	})
 
 	t.Run("callback のエラーで列挙を打ち切る", func(t *testing.T) {
-		err := router.List(ctx, uri("music"), func(string) error { return assert.AnError })
+		err := router.List(ctx, uri("data"), func(string) error { return assert.AnError })
 		assert.ErrorIs(t, err, assert.AnError)
 	})
 }

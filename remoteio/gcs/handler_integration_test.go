@@ -49,10 +49,10 @@ func uri(name string) string { return remoteio.BuildGCSURI(testBucket, name) }
 
 func TestHandlerOpen(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t, object("music/song.txt", "hello gcs"))
+	router := newTestRouter(t, object("data/report.txt", "hello gcs"))
 
 	t.Run("既存オブジェクトを読める", func(t *testing.T) {
-		rc, err := router.Open(ctx, uri("music/song.txt"))
+		rc, err := router.Open(ctx, uri("data/report.txt"))
 		require.NoError(t, err)
 		defer func() { _ = rc.Close() }()
 
@@ -64,7 +64,7 @@ func TestHandlerOpen(t *testing.T) {
 	// スキームに依らず errors.Is(err, os.ErrNotExist) で判定できることが、
 	// このライブラリの抽象が成立するための条件です。
 	t.Run("不在は os.ErrNotExist を包んで返す", func(t *testing.T) {
-		_, err := router.Open(ctx, uri("music/missing.txt"))
+		_, err := router.Open(ctx, uri("data/missing.txt"))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, os.ErrNotExist)
 	})
@@ -78,14 +78,14 @@ func TestHandlerOpen(t *testing.T) {
 
 func TestHandlerExists(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t, object("music/song.txt", "x"))
+	router := newTestRouter(t, object("data/report.txt", "x"))
 
-	exists, err := router.Exists(ctx, uri("music/song.txt"))
+	exists, err := router.Exists(ctx, uri("data/report.txt"))
 	require.NoError(t, err)
 	assert.True(t, exists)
 
 	// 不在は (false, nil)。エラーにすると呼び出し側が毎回握りつぶすことになります。
-	exists, err = router.Exists(ctx, uri("music/missing.txt"))
+	exists, err = router.Exists(ctx, uri("data/missing.txt"))
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -93,7 +93,7 @@ func TestHandlerExists(t *testing.T) {
 func TestHandlerWriteAndDelete(t *testing.T) {
 	ctx := context.Background()
 	router := newTestRouter(t)
-	target := uri("music/new.txt")
+	target := uri("data/new.txt")
 
 	require.NoError(t, router.Write(ctx, target, strings.NewReader("written"),
 		remoteio.WithContentType("text/plain"),
@@ -121,11 +121,11 @@ func TestHandlerWriteAndDelete(t *testing.T) {
 func TestHandlerList(t *testing.T) {
 	ctx := context.Background()
 	router := newTestRouter(t,
-		object("music/README.md", "a"),
-		object("music/job-1/audio.mp3", "b"),
-		object("music/job-1/recipe.json", "c"),
-		object("music/job-2/audio.mp3", "d"),
-		object("music-archive/old.txt", "e"),
+		object("data/README.md", "a"),
+		object("data/dir-1/a.txt", "b"),
+		object("data/dir-1/b.txt", "c"),
+		object("data/dir-2/a.txt", "d"),
+		object("data-archive/old.txt", "e"),
 	)
 
 	collect := func(prefix string, opts ...remoteio.ListOption) []string {
@@ -138,47 +138,47 @@ func TestHandlerList(t *testing.T) {
 	}
 
 	// 区切り文字なしの prefix は「ディレクトリ」ではなく素の文字列前方一致です。
-	// GCS / S3 の意味論そのままなので、music は music-archive/ にも一致します。
+	// GCS / S3 の意味論そのままなので、data は data-archive/ にも一致します。
 	// ディレクトリとして扱いたい場合は末尾に区切り文字を付けるか WithDelimiter を使います。
 	t.Run("区切り文字なしは文字列前方一致で再帰的に列挙する", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
-			uri("music/README.md"),
-			uri("music/job-1/audio.mp3"),
-			uri("music/job-1/recipe.json"),
-			uri("music/job-2/audio.mp3"),
-			uri("music-archive/old.txt"),
-		}, collect("music"))
+			uri("data/README.md"),
+			uri("data/dir-1/a.txt"),
+			uri("data/dir-1/b.txt"),
+			uri("data/dir-2/a.txt"),
+			uri("data-archive/old.txt"),
+		}, collect("data"))
 	})
 
 	t.Run("末尾に区切り文字を付ければディレクトリ相当に絞れる", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
-			uri("music/README.md"),
-			uri("music/job-1/audio.mp3"),
-			uri("music/job-1/recipe.json"),
-			uri("music/job-2/audio.mp3"),
-		}, collect("music/"))
+			uri("data/README.md"),
+			uri("data/dir-1/a.txt"),
+			uri("data/dir-1/b.txt"),
+			uri("data/dir-2/a.txt"),
+		}, collect("data/"))
 	})
 
 	// 疑似ディレクトリは attrs.Name が空で attrs.Prefix に入るため、
-	// そこを取り違えるとジョブ ID の一覧が丸ごと落ちます。
+	// そこを取り違えると疑似ディレクトリの一覧が丸ごと落ちます。
 	t.Run("区切り文字ありでは直下と疑似ディレクトリを返す", func(t *testing.T) {
 		assert.ElementsMatch(t, []string{
-			uri("music/README.md"),
-			uri("music/job-1/"),
-			uri("music/job-2/"),
-		}, collect("music", remoteio.WithDelimiter("/")))
+			uri("data/README.md"),
+			uri("data/dir-1/"),
+			uri("data/dir-2/"),
+		}, collect("data", remoteio.WithDelimiter("/")))
 	})
 
-	// WithDelimiter を使うと ListPrefix が末尾を補うため、music-archive/ は外れます。
+	// WithDelimiter を使うと ListPrefix が末尾を補うため、data-archive/ は外れます。
 	t.Run("区切り文字ありではプレフィックスが正規化される", func(t *testing.T) {
-		for _, got := range collect("music", remoteio.WithDelimiter("/")) {
-			assert.NotContains(t, got, "music-archive")
+		for _, got := range collect("data", remoteio.WithDelimiter("/")) {
+			assert.NotContains(t, got, "data-archive")
 		}
 	})
 
 	t.Run("callback のエラーで列挙を打ち切る", func(t *testing.T) {
 		sentinel := assert.AnError
-		err := router.List(ctx, uri("music"), func(string) error { return sentinel })
+		err := router.List(ctx, uri("data"), func(string) error { return sentinel })
 		assert.ErrorIs(t, err, sentinel)
 	})
 }

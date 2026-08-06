@@ -72,6 +72,8 @@ go test -run 'TestUniversalInputReader_Local/List: stops and returns callback er
 ### ファクトリと署名付き URL
 
 * `IOFactory` は `Close` / `InputReader` / `OutputWriter` / `URLSigner` を要求。両ファクトリはインターフェース外の `Reader()` / `Writer()` も持ち、複合インターフェース側へ委譲しています。
+* `remoteio.Bundle` (`bundle.go`) は、その 3 アクセサを一度に取り出して保持する構造体です。利用側が全く同じ組み立て関数と構造体を各自持っていたものを引き取ったもので、**所有権の受け渡しが要点**です。`NewBundle` は成功した場合にのみ factory のライフサイクルを引き取り（以降 `Bundle.Close` が閉じる）、失敗時は閉じずに返します。組み立て途中の後始末を、他の資源とまとめて呼び出し元が行えるようにするためです。`Close` が nil レシーバーを許容するのは `[]io.Closer` へ入れて一括解放される使われ方に備えたもの。
+* `Bundle` を `Client` と呼ばないのは粒度が違うためです。この型は接続を持たず I/O もせず、他が実装したインターフェースを束ねているだけで、`Close` 以外のメソッドを持ちません。
 * `Close` 後はクライアントを nil にし、以降のアクセサはエラーを返す (S3 の `Close` は SDK 的には不要だが同じ契約に揃えている)。`Close` は冪等。
 * 署名付き URL はスキーム厳格: `gcsURLSigner` は `gs://` 以外、`s3URLSigner` は `s3://` 以外を拒否。S3 は GET / PUT のみ対応。
 * S3 のリージョン未設定時のデフォルトは `ap-northeast-1` (`remoteio/s3/factory.go`)。

@@ -42,6 +42,7 @@ go-remote-io/
     ├── s3/               # S3 具象実装
     │   └── factory.go    # S3 クライアントの管理と初期化
     ├── interfaces.go     # IOFactory / InputReader / OutputWriter 等の定義
+    ├── bundle.go         # IOFactory から各コンポーネントを一括で取り出す Bundle
     ├── reader.go         # UniversalInputReader の振り分け
     ├── reader_local.go   # ローカルファイルの読み込み/一覧/存在確認
     ├── reader_gcs.go     # GCS の読み込み/一覧/存在確認
@@ -70,6 +71,28 @@ Go Remote IO は、役割ごとに細分化されたインターフェースを�
 | **Lister** | `List` | 指定パス配下のリソースを一覧取得する |
 
 これらを組み合わせた **`InputReader`** (Reader + Lister + Exister) および **`OutputWriter`** (Writer + Remover) を通じて、高レベルな操作を実現します。
+
+#### 一括で取り出す (`Bundle`)
+
+`IOFactory` から `InputReader` / `OutputWriter` / `URLSigner` を個別に取り出して構造体へ詰め直す定型処理は、`NewBundle` に集約してあります。
+
+```go
+factory, err := gcs.New(ctx)
+if err != nil {
+    return err
+}
+
+rio, err := remoteio.NewBundle(factory)
+if err != nil {
+    _ = factory.Close() // 失敗時の factory は呼び出し元が所有したままです
+    return err
+}
+defer func() { _ = rio.Close() }() // 成功後のライフサイクルは Bundle が持ちます
+
+rio.Reader.Open(ctx, "gs://bucket/object")
+```
+
+各アクセサは生成済みのクライアントを包むだけで接続も I/O も伴わないため、使わないコンポーネントが含まれてもコストにはなりません。`Close` は nil レシーバーと nil の `Factory` を許容するので、`[]io.Closer` へまとめて入れる使い方でも安全です。
 
 #### 階層を意識した一覧取得 (`WithDelimiter`)
 

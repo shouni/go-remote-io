@@ -118,3 +118,28 @@ func TestIsRemoteURI(t *testing.T) {
 	assert.False(t, IsRemoteURI("http://web.com"))
 	assert.False(t, IsRemoteURI("gs://")) // バケット名がない場合はパースエラー＝falseになる
 }
+
+// TestSchemePrefix は、スキームの取り出しが Router.resolve と同じ解釈になることを確かめます。
+// 呼び出し側が独自に判定を書くと、ここでずれます。
+func TestSchemePrefix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "GCS", path: "gs://bucket/obj", want: "gs://"},
+		{name: "S3", path: "s3://bucket/obj", want: "s3://"},
+		{name: "未対応スキームもそのまま取り出す", path: "ftp://host/file", want: "ftp://"},
+		{name: "絶対パスは空", path: "/var/tmp/file.txt", want: ""},
+		{name: "相対パスは空", path: "data/file.txt", want: ""},
+		{name: "空文字は空", path: "", want: ""},
+		{name: "先頭が区切りなら空（スキーム名が無い）", path: "://bucket/obj", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SchemePrefix(tt.path))
+		})
+	}
+}

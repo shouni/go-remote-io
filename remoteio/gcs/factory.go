@@ -46,12 +46,7 @@ func (f *ClientFactory) Reader() (remoteio.Reader, error) {
 
 // InputReader は読み込みと一覧取得の両方の機能を提供します。
 func (f *ClientFactory) InputReader() (remoteio.InputReader, error) {
-	client, err := f.gcsClient()
-	if err != nil {
-		return nil, err
-	}
-	// 第2引数は S3 クライアント（今回は nil）
-	return remoteio.NewUniversalInputReader(client, nil), nil
+	return f.router()
 }
 
 // --- Writer / OutputWriter 関連 ---
@@ -63,11 +58,7 @@ func (f *ClientFactory) Writer() (remoteio.Writer, error) {
 
 // OutputWriter は書き込み機能を提供します。
 func (f *ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	client, err := f.gcsClient()
-	if err != nil {
-		return nil, err
-	}
-	return remoteio.NewUniversalIOWriter(client, nil), nil
+	return f.router()
 }
 
 // --- その他 ---
@@ -78,7 +69,18 @@ func (f *ClientFactory) URLSigner() (remoteio.URLSigner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return remoteio.NewGCSURLSigner(client), nil
+	return NewURLSigner(client), nil
+}
+
+// router は gs:// とローカルパスを扱う Router を組み立てます。
+// ローカルを併せて登録するのは、同じリーダーで開発時のローカルファイルも
+// 読めるようにするためです（s3:// は登録されないため明確に未対応となります）。
+func (f *ClientFactory) router() (*remoteio.Router, error) {
+	client, err := f.gcsClient()
+	if err != nil {
+		return nil, err
+	}
+	return remoteio.NewRouter(NewHandler(client), remoteio.NewLocalHandler()), nil
 }
 
 // gcsClient は内部用のヘルパーメソッドです。

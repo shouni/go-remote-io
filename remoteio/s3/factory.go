@@ -57,13 +57,7 @@ func (f *ClientFactory) Reader() (remoteio.Reader, error) {
 
 // InputReader は、S3クライアントを注入した InputReader を生成します。
 func (f *ClientFactory) InputReader() (remoteio.InputReader, error) {
-	client, err := f.s3Client()
-	if err != nil {
-		return nil, err
-	}
-
-	// remoteio.NewUniversalInputReader を使用 (GCSクライアントはnil)
-	return remoteio.NewUniversalInputReader(nil, client), nil
+	return f.router()
 }
 
 // --- Writer / OutputWriter 関連 ---
@@ -75,13 +69,7 @@ func (f *ClientFactory) Writer() (remoteio.Writer, error) {
 
 // OutputWriter は、S3クライアントを注入した OutputWriter を生成します。
 func (f *ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	client, err := f.s3Client()
-	if err != nil {
-		return nil, err
-	}
-
-	// remoteio.NewUniversalIOWriter を使用 (GCSクライアントはnil)
-	return remoteio.NewUniversalIOWriter(nil, client), nil
+	return f.router()
 }
 
 // --- その他 ---
@@ -92,7 +80,18 @@ func (f *ClientFactory) URLSigner() (remoteio.URLSigner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return remoteio.NewS3URLSigner(client), nil
+	return NewURLSigner(client), nil
+}
+
+// router は s3:// とローカルパスを扱う Router を組み立てます。
+// ローカルを併せて登録するのは、同じリーダーで開発時のローカルファイルも
+// 読めるようにするためです（gs:// は登録されないため明確に未対応となります）。
+func (f *ClientFactory) router() (*remoteio.Router, error) {
+	client, err := f.s3Client()
+	if err != nil {
+		return nil, err
+	}
+	return remoteio.NewRouter(NewHandler(client), remoteio.NewLocalHandler()), nil
 }
 
 // s3Client は、ファクトリが保持するS3クライアントを返します（内部用）。

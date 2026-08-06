@@ -21,9 +21,10 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および **
 * **ユニバーサル I/O**: path に応じて、**GCS**、**S3**、**ローカルファイルシステム**へのアクセスを自動的に振り分けます。
 * **フル機能のリソース操作**: 単なる読み書きだけでなく、**リソースの存在確認 (Exists)** や **削除 (Delete)** も統一インターフェースでサポート。
 * **Functional Options による書き込み制御**: `Content-Type` や `Content-Disposition` を型安全かつ柔軟に指定可能。ブラウザでのインライン再生や強制ダウンロードの制御が容易です。
-* **プラグイン可能な実装**:
+* **プラグイン可能な実装**: 対応スキームは `SchemeHandler` の集合として `Router` に登録します。未登録のスキームは呼び出し時に「未対応」として明確に拒否されます。
   * **GCS サブパッケージ**: Google Cloud Storage 公式クライアントを利用した I/O 実装。
   * **S3 サブパッケージ**: AWS SDK for Go v2 を利用した S3 向け I/O 実装。
+  * **クラウド SDK 非依存のコア**: `remoteio` パッケージ自体は GCS / AWS の SDK を import しません。抽象だけを使うアプリケーションのビルドにクラウド SDK は入りません。
 * **統一されたインターフェース**:
   * `InputReader`: 読み込み (`Open`)、一覧取得 (`List`)、存在確認 (`Exists`) を統合。
   * `OutputWriter`: 書き込み (`Write`)、削除 (`Delete`) を統合。
@@ -37,22 +38,21 @@ Go Remote IO は、**Google Cloud Storage (GCS)**、**Amazon S3**、および **
 ```text
 go-remote-io/
 └── remoteio/             # I/Oの核となる抽象化レイヤー
-    ├── gcs/              # GCS 具象実装
-    │   └── factory.go    # GCS クライアントの管理と初期化
-    ├── s3/               # S3 具象実装
-    │   └── factory.go    # S3 クライアントの管理と初期化
+    ├── gcs/              # GCS 具象実装 (このパッケージだけが GCS SDK に依存)
+    │   ├── factory.go    # GCS クライアントの管理と初期化
+    │   ├── handler.go    # 読み込み/一覧/存在確認/書き込み/削除
+    │   └── signer.go     # 署名付きURL生成
+    ├── s3/               # S3 具象実装 (このパッケージだけが AWS SDK に依存)
+    │   ├── factory.go    # S3 クライアントの管理と初期化
+    │   ├── handler.go    # 読み込み/一覧/存在確認/書き込み/削除
+    │   └── signer.go     # 署名付きURL生成
     ├── interfaces.go     # IOFactory / InputReader / OutputWriter 等の定義
+    ├── handler.go        # SchemeHandler (1スキーム分の実装の契約)
+    ├── handler_local.go  # ローカルファイルシステムの SchemeHandler 実装
+    ├── router.go         # スキームを見て SchemeHandler へ振り分ける Router
     ├── bundle.go         # IOFactory から各コンポーネントを一括で取り出す Bundle
-    ├── reader.go         # UniversalInputReader の振り分け
-    ├── reader_local.go   # ローカルファイルの読み込み/一覧/存在確認
-    ├── reader_gcs.go     # GCS の読み込み/一覧/存在確認
-    ├── reader_s3.go      # S3 の読み込み/一覧/存在確認
-    ├── write_options.go  # Functional Options (WithContentType, etc.) の定義
-    ├── writer.go         # UniversalIOWriter の振り分け
-    ├── writer_local.go   # ローカルファイルの書き込み/削除
-    ├── writer_gcs.go     # GCS の書き込み/削除
-    ├── writer_s3.go      # S3 の書き込み/削除
-    ├── signer.go         # URLSigner (署名付きURL生成の抽象化)
+    ├── list_options.go   # ListOption / ListSettings (WithDelimiter 等)
+    ├── write_options.go  # WriteOption / WriteSettings (WithContentType 等)
     └── uri.go            # URIの判定・解析ユーティリティ
 ```
 
@@ -71,6 +71,22 @@ Go Remote IO は、役割ごとに細分化されたインターフェースを�
 | **Lister** | `List` | 指定パス配下のリソースを一覧取得する |
 
 これらを組み合わせた **`InputReader`** (Reader + Lister + Exister) および **`OutputWriter`** (Writer + Remover) を通じて、高レベルな操作を実現します。
+
+#### スキームの登録 (`Router` / `SchemeHandler`)
+
+`gcs.New` / `s3.New` が返すファクトリを使う限り、`Router` の存在を意識する必要はありません。
+自前のスキームを足したい場合や、扱うスキームを明示的に限定したい場合だけ直接組み立てます。
+
+```go
+// gs:// とローカルパスだけを扱う（s3:// は「未対応」として拒否される）
+router := remoteio.NewRouter(
+    gcs.NewHandler(gcsClient),
+    remoteio.NewLocalHandler(),
+)
+```
+
+`Router` は `InputReader` と `OutputWriter` の両方を満たします。対応スキームを
+ハンドラの集合という明示的なデータとして持つため、未対応の判定は 1 箇所に集まります。
 
 #### 一括で取り出す (`Bundle`)
 
@@ -121,8 +137,13 @@ err := reader.List(ctx, "gs://bucket/music", func(uri string) error {
 `remoteio.NewListSettings(opts...)` で解決すると本体と同じ設定が得られます。
 プレフィックスの正規化も `remoteio.ListPrefix` で再現できます。
 
-ローカルパスに対しても同じ意味で働き、区切り文字を指定したときだけディレクトリが列挙されます
-（指定しない場合の挙動は従来どおりファイルのみです）。
+ローカルパスに対しても同じ意味で働き、区切り文字を指定したときだけディレクトリが列挙されます。
+区切り文字を指定しない場合は GCS / S3 と同じく配下を再帰的に列挙します。
+
+> **プレフィックスの意味**: 区切り文字を指定しない `List` の prefix は、GCS / S3 の意味論そのままの
+> **文字列前方一致**です（`music` は `music-archive/` にも一致します）。ディレクトリとして扱いたい場合は
+> 末尾に区切り文字を付けるか、`WithDelimiter` を使ってください。ローカルパスだけは
+> ファイルシステムの性質上ディレクトリ単位の走査になります。
 
 ---
 

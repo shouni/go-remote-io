@@ -12,9 +12,9 @@ import (
 )
 
 // 1. ローカル書き込み・削除のテスト (実ファイル操作)
-func TestUniversalIOWriter_Local(t *testing.T) {
+func TestRouterLocalWrite(t *testing.T) {
 	ctx := context.Background()
-	writer := NewUniversalIOWriter(nil, nil)
+	writer := NewRouter(NewLocalHandler())
 
 	tmpDir, err := os.MkdirTemp("", "remoteio_writer_test")
 	require.NoError(t, err)
@@ -74,10 +74,13 @@ func TestUniversalIOWriter_Local(t *testing.T) {
 	})
 }
 
-// 2. クラウドURIの振り分け（ディスパッチ）ロジックのテスト
-func TestUniversalIOWriter_Dispatch(t *testing.T) {
+// 2. 登録されていないスキームは、書き込みも削除も明確に拒否されること。
+//
+// 以前は「クライアントが未初期化です」というエラーで、対応していないのか
+// 設定を忘れたのかが呼び出し側から区別できませんでした。
+func TestRouterWriteRejectsUnregisteredScheme(t *testing.T) {
 	ctx := context.Background()
-	writer := NewUniversalIOWriter(nil, nil)
+	writer := NewRouter(NewLocalHandler())
 	content := bytes.NewReader([]byte("test content"))
 
 	tests := []struct {
@@ -88,30 +91,30 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 		expectedErr string
 	}{
 		{
-			name:        "Write GCS - client error with cache option",
+			name:        "Write GCS - 未登録スキーム",
 			uri:         "gs://my-bucket/obj",
 			op:          "Write",
 			withCache:   true,
-			expectedErr: "GCSクライアントが初期化されていません",
+			expectedErr: "未対応のURIスキームです",
 		},
 		{
-			name:        "Write S3 - client error with cache option",
+			name:        "Write S3 - 未登録スキーム",
 			uri:         "s3://my-bucket/obj",
 			op:          "Write",
 			withCache:   true,
-			expectedErr: "S3クライアントが初期化されていません",
+			expectedErr: "未対応のURIスキームです",
 		},
 		{
-			name:        "Delete GCS - client error",
+			name:        "Delete GCS - 未登録スキーム",
 			uri:         "gs://my-bucket/obj",
 			op:          "Delete",
-			expectedErr: "GCSクライアントが未初期化です",
+			expectedErr: "未対応のURIスキームです",
 		},
 		{
-			name:        "Delete S3 - client error",
+			name:        "Delete S3 - 未登録スキーム",
 			uri:         "s3://my-bucket/obj",
 			op:          "Delete",
-			expectedErr: "S3クライアントが未初期化です",
+			expectedErr: "未対応のURIスキームです",
 		},
 		{
 			name:        "Write Local - Invalid path",
@@ -146,8 +149,8 @@ func TestUniversalIOWriter_Dispatch(t *testing.T) {
 
 // 3. インターフェース満足度のテスト
 func TestOutputWriter_InterfaceSatisfaction(_ *testing.T) {
-	// 定義したインターフェースを UniversalIOWriter が満たしているかコンパイル時にチェック
-	var _ Writer = (*UniversalIOWriter)(nil)
-	var _ Remover = (*UniversalIOWriter)(nil)
-	var _ OutputWriter = (*UniversalIOWriter)(nil)
+	// 定義したインターフェースを Router が満たしているかコンパイル時にチェック
+	var _ Writer = (*Router)(nil)
+	var _ Remover = (*Router)(nil)
+	var _ OutputWriter = (*Router)(nil)
 }

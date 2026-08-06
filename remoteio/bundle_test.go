@@ -1,8 +1,10 @@
 package remoteio_test
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,21 +28,28 @@ func (f *stubFactory) InputReader() (remoteio.InputReader, error) {
 	if f.readerErr != nil {
 		return nil, f.readerErr
 	}
-	return remoteio.NewUniversalInputReader(nil, nil), nil
+	return remoteio.NewRouter(remoteio.NewLocalHandler()), nil
 }
 
 func (f *stubFactory) OutputWriter() (remoteio.OutputWriter, error) {
 	if f.writerErr != nil {
 		return nil, f.writerErr
 	}
-	return remoteio.NewUniversalIOWriter(nil, nil), nil
+	return remoteio.NewRouter(remoteio.NewLocalHandler()), nil
 }
 
 func (f *stubFactory) URLSigner() (remoteio.URLSigner, error) {
 	if f.signerErr != nil {
 		return nil, f.signerErr
 	}
-	return remoteio.NewGCSURLSigner(nil), nil
+	return stubSigner{}, nil
+}
+
+// stubSigner は URLSigner を満たすだけのスタブです。
+type stubSigner struct{}
+
+func (stubSigner) GenerateSignedURL(context.Context, string, string, time.Duration) (string, error) {
+	return "", nil
 }
 
 func (f *stubFactory) Close() error {

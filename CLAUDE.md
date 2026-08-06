@@ -23,35 +23,38 @@ govulncheck ./...
 
 ```bash
 go test -run 'TestListWithDelimiterLocal' ./remoteio/
-go test -run 'TestUniversalInputReader_Local/List: stops and returns callback error' ./remoteio/
+go test -run 'TestRouterLocal/List: stops and returns callback error' ./remoteio/
 ```
 
 `golangci-lint` / `govulncheck` はローカルにインストール済み (`~/go/bin`)。
 
 ## アーキテクチャ
 
-### スキーム振り分けは「呼び出し時」に行われる
+### スキーム振り分けは「呼び出し時」、対応スキームは「構築時」
 
-`remoteio` パッケージの具象型は `UniversalInputReader` と `UniversalIOWriter` の 2 つだけで、どちらも GCS クライアントと S3 クライアントの**両方**を保持します (`NewUniversalInputReader(gcsClient, s3Client)`)。実際にどのストレージを触るかは、渡された `path` の接頭辞 (`gs://` / `s3://` / それ以外はローカル) を毎回判定して決まります。
+パスは設定やユーザー入力から来るため、どのストレージを触るかは静的に決められません。一方「どのスキームに対応しているか」は構築時に決まる情報です。この 2 つを分けているのが `Router` (`remoteio/router.go`) と `SchemeHandler` (`remoteio/handler.go`) です。
 
-* `remoteio/gcs`・`remoteio/s3` のサブパッケージは「クライアントを 1 つだけ注入した Universal 型」を組み立てる `ClientFactory` にすぎません。したがって **gcs ファクトリから得た Reader でもローカルパスは読める**一方、`s3://` を渡すと「S3クライアントが未初期化です」エラーになります。
-* 注入されていないクライアント側の分岐は必ず nil ガードから始まります。新しいストレージ操作を追加するときは、この nil ガード → URI パース → 空オブジェクト名チェックの順序を既存実装に合わせてください。
-* Writer 側の分岐は `dispatchRemote` (`remoteio/writer.go`) に一本化されています。`Write` と `Delete` が同形の分岐を持っていた重複を潰したものなので、新しい書き込み系操作もここを通します。Reader 側は戻り値の型が揃わないため個別の if 連鎖のままです。
+* `Router` は `SchemeHandler` の集合を持ち、`InputReader` と `OutputWriter` の**両方**を満たします。`resolve` が `path` からスキームを取り出してハンドラを引き、未登録なら「未対応のURIスキームです」で返します。**未対応の判定はこの 1 箇所だけ**です。
+* `Scheme()` が空文字のハンドラ (`NewLocalHandler`) はフォールバックになり、スキームを持たないパス（ローカル）を受け取ります。`gcs.ClientFactory` / `s3.ClientFactory` は自分のスキームとローカルの 2 つを登録するので、**gcs ファクトリから得た Reader でもローカルパスは読めます**が、`s3://` は未登録として明確に拒否されます。
+* 以前はひとつの具象型が GCS と S3 のクライアントを両方保持し、注入されていない方を nil にすることで「未対応」を表現していました。その形だと未対応であることが呼び出し時のエラー文字列でしか分からず、同じ nil ガードが操作ごとに散らばります。ハンドラの集合という明示的なデータに置き換えたのがこの構造です。
+* 値を返す操作の振り分けはジェネリックな `dispatch[T]` (`remoteio/router.go`) を通します。以前は Reader 側だけ戻り値の型が揃わず if 連鎖のままでしたが、型パラメータで統一しました。
 
 ### ファイル分割の規則
 
-`reader.go` / `writer.go` が振り分けとエントリポイントを持ち、実装は `*_local.go` / `*_gcs.go` / `*_s3.go` に非公開メソッド (`openGCS`, `listS3`, `writeLocal` …) として置かれます。ストレージ固有の処理を `reader.go` や `writer.go` に書かないこと。
+`remoteio` パッケージは**クラウド SDK を import しません**。GCS/AWS の SDK に触れてよいのは `remoteio/gcs` と `remoteio/s3` だけです。抽象だけを使うアプリケーションのビルドにクラウド SDK を持ち込まないための境界なので、`remoteio` 直下に SDK 依存を足さないでください。
+
+各スキームパッケージは `factory.go`（クライアントのライフサイクル）、`handler.go`（`SchemeHandler` の実装）、`signer.go`（署名付き URL）の 3 つに分かれます。新しいストレージ操作を追加するときは、`SchemeHandler` にメソッドを足し、各パッケージの `handler.go` に実装します。実装の順序（クライアント nil チェック → URI パース → 空オブジェクト名チェック）は既存に合わせてください。
 
 ### 2 系統の Functional Options
 
-| | 設定型 | 公開範囲 |
+| | 設定型 | 解決関数 |
 | :-- | :-- | :-- |
-| `WriteOption` (`write_options.go`) | `writeConfig` | 非公開 |
-| `ListOption` (`list_options.go`) | `ListSettings` | **公開** |
+| `WriteOption` (`write_options.go`) | `WriteSettings` | `NewWriteSettings` |
+| `ListOption` (`list_options.go`) | `ListSettings` | `NewListSettings` |
 
-`ListSettings` と `NewListSettings` / `ListPrefix` を公開しているのは意図的です。`Lister` インターフェース経由で `opts ...ListOption` を受け取る第三者実装やテストのフェイクが、中身を読めないまま区切り文字を無視してしまう状態を避けるためです (commit ed05c68)。`ListOption` を増やす場合は `ListSettings` にフィールドを足し、実装側が `NewListSettings(opts...)` で同じ解決結果を得られる形を保ちます。
+どちらの設定型も公開しています。`Lister` / `SchemeHandler` を実装する第三者やテストのフェイクが、中身を読めないままオプションを無視してしまう状態を避けるためです (`ListSettings` の公開は commit ed05c68、`WriteSettings` は `SchemeHandler` が別パッケージから設定を読む必要が出たときに揃えました)。オプションを増やす場合は設定型にフィールドを足し、実装側が `New*Settings(opts...)` で同じ解決結果を得られる形を保ちます。
 
-`WriteOption` の `Content-Type` などのメタデータはローカル書き込みでは黙って無視されます (`writer_local.go` のコメント参照)。
+`WriteOption` の `Content-Type` などのメタデータはローカル書き込みでは黙って無視されます (`handler_local.go` のコメント参照)。
 
 ### `WithDelimiter` の意味論
 
@@ -59,7 +62,8 @@ go test -run 'TestUniversalInputReader_Local/List: stops and returns callback er
 
 * prefix は `ListPrefix` で正規化される (`music` → `music/`)。正規化しないと `music-archive/` まで一致するため。
 * GCS は疑似ディレクトリが `attrs.Name` 空 + `attrs.Prefix` に、S3 は `Contents` ではなく `CommonPrefixes` に入る。prefix 自身は除外する。
-* ローカルの `listLocal` は、**区切り文字が指定されたときだけ**ディレクトリを列挙します。未指定時にディレクトリを混ぜると既存呼び出し側の挙動が変わるため、後方互換のためのガードです。
+* ローカルの一覧は、区切り文字ありなら直下のみ（ディレクトリを区切り文字付きで併せて返す）、区切り文字なしなら `filepath.WalkDir` で再帰的にファイルだけを返します。GCS / S3 が prefix 配下を再帰的に返すのに対しローカルだけ直下で止まると、同じ呼び出しがスキームによって別の意味になり、呼び出し側からその違いが見えないためです。
+* ただし**区切り文字なしの prefix は、GCS / S3 では素の文字列前方一致**です（`music` は `music-archive/` にも一致する）。`ListPrefix` の正規化は区切り文字を指定したときだけ働きます。ローカルはファイルシステムの性質上ディレクトリ単位の走査になるため、ここだけは意味が揃いません。
 
 ### エラーの約束事
 
@@ -75,13 +79,14 @@ go test -run 'TestUniversalInputReader_Local/List: stops and returns callback er
 * `remoteio.Bundle` (`bundle.go`) は、その 3 アクセサを一度に取り出して保持する構造体です。利用側が全く同じ組み立て関数と構造体を各自持っていたものを引き取ったもので、**所有権の受け渡しが要点**です。`NewBundle` は成功した場合にのみ factory のライフサイクルを引き取り（以降 `Bundle.Close` が閉じる）、失敗時は閉じずに返します。組み立て途中の後始末を、他の資源とまとめて呼び出し元が行えるようにするためです。`Close` が nil レシーバーを許容するのは `[]io.Closer` へ入れて一括解放される使われ方に備えたもの。
 * `Bundle` を `Client` と呼ばないのは粒度が違うためです。この型は接続を持たず I/O もせず、他が実装したインターフェースを束ねているだけで、`Close` 以外のメソッドを持ちません。
 * `Close` 後はクライアントを nil にし、以降のアクセサはエラーを返す (S3 の `Close` は SDK 的には不要だが同じ契約に揃えている)。`Close` は冪等。
-* 署名付き URL はスキーム厳格: `gcsURLSigner` は `gs://` 以外、`s3URLSigner` は `s3://` 以外を拒否。S3 は GET / PUT のみ対応。
+* 署名付き URL はスキーム厳格: `gcs.NewURLSigner` は `gs://` 以外、`s3.NewURLSigner` は `s3://` 以外を拒否。S3 は GET / PUT のみ対応。
 * S3 のリージョン未設定時のデフォルトは `ap-northeast-1` (`remoteio/s3/factory.go`)。
 
 ## テスト
 
 * testify (`require` で前提、`assert` で検証) + `t.Run` サブテスト。テーブル駆動が基本。
-* クラウドのエミュレータは使いません。リモートパスのテストは **nil クライアントを渡してバリデーション・振り分けのエラーを確認する**範囲に留めています。実 I/O を伴うテストを足すときはこの前提を崩さないか検討してください。
+* リモートパスの読み書き・一覧・存在確認は**インプロセスのフェイク**で実際に動かします (`remoteio/gcs/handler_integration_test.go` が `fsouza/fake-gcs-server`、`remoteio/s3/handler_integration_test.go` が `johannesboyne/gofakes3`)。どちらも Go ライブラリとしてプロセス内で起動するため docker も認証情報も不要で、通常の `go test ./...` で走ります。以前はここが未検証で、疑似ディレクトリの扱い（GCS は `attrs.Prefix`、S3 は `CommonPrefixes`）のように壊れても静かなロジックがテストの外にありました。
+* `remoteio` パッケージ側のテストは、ローカルハンドラと `Router` の振り分けに集中します。
 * `remoteio/gcs` のファクトリテストは `storage.NewClient` が ADC を要求するため、`google.FindDefaultCredentials` が失敗する環境 (CI 等) では `skipWithoutGCPCredentials` でスキップします。
 * インターフェース充足は `TestXxx_InterfaceSatisfaction` (コンパイル時チェック) と各ファクトリの `var _ remoteio.IOFactory = (*ClientFactory)(nil)` で担保。
 

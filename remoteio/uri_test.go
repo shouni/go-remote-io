@@ -143,3 +143,48 @@ func TestSchemePrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeBucketName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "裸の名前はそのまま", input: "my-bucket", want: "my-bucket"},
+		{name: "前後の空白を落とす", input: "  my-bucket  ", want: "my-bucket"},
+		{
+			// コンソールから貼るとこの形になります。素通しすると BuildGCSURI が
+			// gs://gs://my-bucket//path を作ります。
+			name:  "gs:// プレフィックスを落とす",
+			input: "gs://my-bucket",
+			want:  "my-bucket",
+		},
+		{name: "s3:// プレフィックスを落とす", input: "s3://my-bucket", want: "my-bucket"},
+		{name: "末尾スラッシュを落とす", input: "gs://my-bucket/", want: "my-bucket"},
+		{name: "空白とスキームと両端スラッシュの複合", input: " /gs://my-bucket/ ", want: "gs://my-bucket"},
+		{name: "空文字列は空文字列", input: "", want: ""},
+		{
+			// バケットとパスの分解は担当しません（ParseRemoteURI の役目）。
+			name:  "オブジェクトパスは分解しない",
+			input: "gs://my-bucket/a/b.txt",
+			want:  "my-bucket/a/b.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeBucketName(tt.input); got != tt.want {
+				t.Errorf("NormalizeBucketName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// 正規化を通した値が BuildGCSURI で二重スキームにならないこと。
+// この 2 つは対で使われるため、片方だけ変えると壊れます。
+func TestNormalizeBucketNameFeedsBuildGCSURI(t *testing.T) {
+	got := BuildGCSURI(NormalizeBucketName("gs://my-bucket/"), "reviews/1.json")
+	if want := "gs://my-bucket/reviews/1.json"; got != want {
+		t.Errorf("BuildGCSURI = %q, want %q", got, want)
+	}
+}

@@ -39,6 +39,24 @@ func ParseRemoteURI(uri string) (bucketName, objectPath string, err error) {
 	return "", "", fmt.Errorf("未対応のURIスキームです: %s", uri)
 }
 
+// NormalizeBucketName は、バケット「名」として受け取った値の表記ゆれを整えます。
+// 前後の空白、スキームプレフィックス (gs:// / s3://)、前後のスラッシュを落とします。
+//
+// 設定から読んだバケット名を BuildGCSURI / BuildS3URI へ渡す前に通すことを想定しています。
+// これらは受け取った値をそのまま連結するため、コンソールから貼った `gs://my-bucket/` の
+// ような値を素通しすると `gs://gs://my-bucket//path` という URI を組み立ててしまい、
+// 失敗するのは書き込みの時点になります。
+//
+// オブジェクトパスまで含む URI は分解しません（`gs://b/a/b.txt` は `b/a/b.txt` のまま
+// 返ります）。バケットとパスを分けたい場合は ParseRemoteURI を使ってください。
+func NormalizeBucketName(bucket string) string {
+	bucket = strings.TrimSpace(bucket)
+	bucket = strings.TrimPrefix(bucket, PrefixGCS)
+	bucket = strings.TrimPrefix(bucket, PrefixS3)
+
+	return strings.Trim(bucket, "/")
+}
+
 // BuildGCSURI は GCS 用のURIを作成します
 func BuildGCSURI(bucketName, objectPath string) string {
 	return buildRemoteURI(PrefixGCS, bucketName, objectPath)

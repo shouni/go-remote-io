@@ -131,6 +131,8 @@ Go Remote IO は、役割ごとに細分化されたインターフェースを�
 
 URI の判定・組み立てには `IsGCSURI` / `IsS3URI` / `IsRemoteURI` / `ParseRemoteURI` / `BuildGCSURI` / `BuildS3URI` / `SchemePrefix` を用意しています（`SchemePrefix` 以外は `gs://` と `s3://` 向けのヘルパーです）。
 
+設定から読んだバケット**名**は `NormalizeBucketName` を通してから `BuildGCSURI` / `BuildS3URI` へ渡してください。これらは受け取った値をそのまま連結するため、コンソールから貼った `gs://my-bucket/` を素通しすると `gs://gs://my-bucket//path` という URI ができ、失敗するのは書き込みの時点になります。
+
 ---
 
 ## 📏 約束事 (Contracts)

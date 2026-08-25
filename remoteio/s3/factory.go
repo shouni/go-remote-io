@@ -12,6 +12,9 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
+// DefaultRegion は、リージョンが解決できなかった場合に適用されるリージョンです。
+const DefaultRegion = "ap-northeast-1"
+
 // ClientFactory は AWS/S3クライアントとS3関連のI/Oコンポーネントを管理します。
 type ClientFactory struct {
 	client    *s3.Client
@@ -20,25 +23,122 @@ type ClientFactory struct {
 
 var _ remoteio.IOFactory = (*ClientFactory)(nil)
 
+// settings は Option を解決した結果です。
+type settings struct {
+	client       *s3.Client
+	awsConfig    *aws.Config
+	region       string
+	endpoint     string
+	usePathStyle bool
+	configOpts   []func(*config.LoadOptions) error
+	s3Opts       []func(*s3.Options)
+}
+
+// Option は ClientFactory の生成方法を変える Functional Option です。
+//
+// 以前は config.LoadDefaultConfig(ctx) 決め打ちだったため、S3 互換ストレージ
+// (MinIO, Cloudflare R2 など) やカスタムエンドポイントへ接続する手段が無く、
+// ファクトリを使うか自前で Router を組むかの二択になっていました。
+type Option func(*settings)
+
+// WithClient は生成済みの S3 クライアントを使います。
+// このとき aws.Config は解決されないため、awsConfig はゼロ値のままです。
+func WithClient(client *s3.Client) Option {
+	return func(s *settings) { s.client = client }
+}
+
+// WithConfig は解決済みの aws.Config を使い、LoadDefaultConfig を呼びません。
+func WithConfig(cfg aws.Config) Option {
+	return func(s *settings) { s.awsConfig = &cfg }
+}
+
+// WithRegion はリージョンを明示します。環境や設定ファイルより優先されます。
+func WithRegion(region string) Option {
+	return func(s *settings) { s.region = region }
+}
+
+// WithEndpoint は接続先エンドポイントを差し替えます。
+// MinIO や Cloudflare R2 のような S3 互換ストレージ、およびテスト用のフェイク向けです。
+func WithEndpoint(endpoint string) Option {
+	return func(s *settings) { s.endpoint = endpoint }
+}
+
+// WithPathStyle はパス形式のアドレッシングを使います。
+// 仮想ホスト形式のバケット名を解決できない S3 互換ストレージで必要になります。
+func WithPathStyle() Option {
+	return func(s *settings) { s.usePathStyle = true }
+}
+
+// WithConfigOptions は config.LoadDefaultConfig へ渡すオプションを指定します
+// （認証情報プロバイダの差し替えなど）。
+func WithConfigOptions(opts ...func(*config.LoadOptions) error) Option {
+	return func(s *settings) { s.configOpts = append(s.configOpts, opts...) }
+}
+
+// WithS3Options は s3.NewFromConfig へ渡すオプションを指定します。
+// WithEndpoint / WithPathStyle より後に適用されるため、必要なら上書きできます。
+func WithS3Options(opts ...func(*s3.Options)) Option {
+	return func(s *settings) { s.s3Opts = append(s.s3Opts, opts...) }
+}
+
 // New は新しい ClientFactory インスタンスを作成します。
-func New(ctx context.Context) (*ClientFactory, error) {
-	// 1. AWS Config のロード (IAMロール、環境変数などを自動検索)
-	awsCfg, err := config.LoadDefaultConfig(ctx)
+// オプションを渡さない場合は IAMロールや環境変数から設定を自動検索します。
+func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
+	var cfg settings
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
+	if cfg.client != nil {
+		return &ClientFactory{client: cfg.client}, nil
+	}
+
+	awsCfg, err := resolveAWSConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("AWS設定のロードに失敗しました (認証情報が不足しています): %w", err)
+		return nil, err
 	}
 
-	// リージョンが未設定の場合はデフォルト値を適用
-	const defaultRegion = "ap-northeast-1"
-	if awsCfg.Region == "" {
-		awsCfg.Region = defaultRegion
-	}
-
-	// 2. S3 クライアントの初期化とファクトリの生成
 	return &ClientFactory{
-		client:    s3.NewFromConfig(awsCfg),
+		client:    s3.NewFromConfig(awsCfg, clientOptions(cfg)...),
 		awsConfig: awsCfg,
 	}, nil
+}
+
+// resolveAWSConfig は aws.Config を決定します。
+// 明示指定 > 環境や設定ファイル > DefaultRegion の順でリージョンが決まります。
+func resolveAWSConfig(ctx context.Context, cfg settings) (aws.Config, error) {
+	awsCfg := aws.Config{}
+	if cfg.awsConfig != nil {
+		awsCfg = *cfg.awsConfig
+	} else {
+		loaded, err := config.LoadDefaultConfig(ctx, cfg.configOpts...)
+		if err != nil {
+			return aws.Config{}, fmt.Errorf("AWS設定のロードに失敗しました (認証情報が不足しています): %w", err)
+		}
+		awsCfg = loaded
+	}
+
+	if cfg.region != "" {
+		awsCfg.Region = cfg.region
+	}
+	if awsCfg.Region == "" {
+		awsCfg.Region = DefaultRegion
+	}
+	return awsCfg, nil
+}
+
+// clientOptions は s3.NewFromConfig へ渡すオプションを組み立てます。
+func clientOptions(cfg settings) []func(*s3.Options) {
+	opts := make([]func(*s3.Options), 0, len(cfg.s3Opts)+2)
+	if cfg.endpoint != "" {
+		opts = append(opts, func(o *s3.Options) { o.BaseEndpoint = aws.String(cfg.endpoint) })
+	}
+	if cfg.usePathStyle {
+		opts = append(opts, func(o *s3.Options) { o.UsePathStyle = true })
+	}
+	return append(opts, cfg.s3Opts...)
 }
 
 // Close はインターフェース要件に準拠するために実装された no-op メソッドです。
@@ -83,15 +183,24 @@ func (f *ClientFactory) URLSigner() (remoteio.URLSigner, error) {
 	return NewURLSigner(client), nil
 }
 
-// router は s3:// とローカルパスを扱う Router を組み立てます。
-// ローカルを併せて登録するのは、同じリーダーで開発時のローカルファイルも
-// 読めるようにするためです（gs:// は登録されないため明確に未対応となります）。
-func (f *ClientFactory) router() (*remoteio.Router, error) {
+// SchemeHandler は s3:// を担当するハンドラを返します。
+// remoteio.NewMultiFactory が複数スキームを 1 つの Router に集約するために使います。
+func (f *ClientFactory) SchemeHandler() (remoteio.SchemeHandler, error) {
 	client, err := f.s3Client()
 	if err != nil {
 		return nil, err
 	}
-	return remoteio.NewRouter(NewHandler(client), remoteio.NewLocalHandler()), nil
+	return NewHandler(client), nil
+}
+
+// router は s3:// とローカル関連のパスを扱う Router を組み立てます
+// （gs:// は登録されないため明確に未対応となります）。
+func (f *ClientFactory) router() (*remoteio.Router, error) {
+	handler, err := f.SchemeHandler()
+	if err != nil {
+		return nil, err
+	}
+	return remoteio.NewSchemeRouter(handler), nil
 }
 
 // s3Client は、ファクトリが保持するS3クライアントを返します（内部用）。

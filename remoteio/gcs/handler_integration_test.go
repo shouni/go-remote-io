@@ -40,8 +40,8 @@ func newTestRouter(t *testing.T, objects ...fakestorage.Object) *remoteio.Router
 
 func object(name, content string) fakestorage.Object {
 	return fakestorage.Object{
-		ObjectAttrs: fakestorage.ObjectAttrs{BucketName: testBucket, Name: name},
-		Content:     []byte(content),
+		BucketName: testBucket, Name: name,
+		Content: []byte(content),
 	}
 }
 

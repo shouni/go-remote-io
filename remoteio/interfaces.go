@@ -51,6 +51,37 @@ type Remover interface {
 	Delete(ctx context.Context, path string) error
 }
 
+// ObjectInfo は、リソースのメタデータです。
+//
+// Exists は真偽しか返さないため、サイズや更新時刻が要るときは結局スキームごとの
+// API を直接叩くことになっていました。GCS の ObjectAttrs も S3 の HeadObject も
+// Exists の実装で既に呼んでいるので、情報を捨てていただけです。
+type ObjectInfo struct {
+	// Path は問い合わせに使ったパスです（リモートなら URI がそのまま入ります）。
+	Path string
+	// Size はバイト数です。
+	Size int64
+	// ModTime は最終更新時刻です。
+	ModTime time.Time
+	// ContentType は MIME タイプです。ローカルファイルシステムでは空になります。
+	ContentType string
+	// Metadata は WithMetadata で書き込んだユーザー定義メタデータです。
+	// ローカルファイルシステムでは常に nil です。
+	// S3 はキーを小文字に正規化するため、書き込み時と大文字小文字が変わることがあります。
+	Metadata map[string]string
+}
+
+// Stater は、リソースのメタデータを取得する機能を提供します。
+//
+// InputReader には含めていません。含めると、この複合インターフェースを実装している
+// 既存のフェイクや代替実装が一斉にコンパイルできなくなるためです。*Router は
+// Stater を満たすので、型アサーションか Stat 関数から使えます。
+type Stater interface {
+	// Stat は、指定された path のメタデータを返します。
+	// 見つからない場合のエラーは Open と同じく os.ErrNotExist を含みます。
+	Stat(ctx context.Context, path string) (ObjectInfo, error)
+}
+
 // Exister は、リソースの存在確認を行う機能を提供します。
 type Exister interface {
 	// Exists は、指定された path にリソースが存在するかどうかを確認します。

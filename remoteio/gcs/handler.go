@@ -84,6 +84,31 @@ func (h *Handler) List(ctx context.Context, gcsURI string, callback func(string)
 	return nil
 }
 
+// Stat は GCS オブジェクトのメタデータを返します。
+// 見つからない場合のエラーは Open と同じく os.ErrNotExist を含みます。
+func (h *Handler) Stat(ctx context.Context, gcsURI string) (remoteio.ObjectInfo, error) {
+	bucketName, objectName, err := h.parseObjectURI(gcsURI)
+	if err != nil {
+		return remoteio.ObjectInfo{}, err
+	}
+
+	attrs, err := h.client.Bucket(bucketName).Object(objectName).Attrs(ctx)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return remoteio.ObjectInfo{}, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
+		}
+		return remoteio.ObjectInfo{}, fmt.Errorf("GCS属性取得失敗 (URI: %s): %w", gcsURI, err)
+	}
+
+	return remoteio.ObjectInfo{
+		Path:        gcsURI,
+		Size:        attrs.Size,
+		ModTime:     attrs.Updated,
+		ContentType: attrs.ContentType,
+		Metadata:    attrs.Metadata,
+	}, nil
+}
+
 // Exists は GCS オブジェクトの存在を確認します。不在は (false, nil) を返します。
 func (h *Handler) Exists(ctx context.Context, gcsURI string) (bool, error) {
 	bucketName, objectName, err := h.parseObjectURI(gcsURI)
@@ -122,6 +147,9 @@ func (h *Handler) Write(ctx context.Context, gcsURI string, contentReader io.Rea
 	}
 	if settings.CacheControl != "" {
 		wc.CacheControl = settings.CacheControl
+	}
+	if len(settings.Metadata) > 0 {
+		wc.Metadata = settings.Metadata
 	}
 
 	if _, err := io.Copy(wc, contentReader); err != nil {

@@ -24,6 +24,7 @@ type Router struct {
 var (
 	_ InputReader  = (*Router)(nil)
 	_ OutputWriter = (*Router)(nil)
+	_ Stater       = (*Router)(nil)
 )
 
 // NewRouter は、渡されたハンドラを担当スキームごとに登録した Router を返します。
@@ -91,6 +92,13 @@ func SchemePrefix(path string) string {
 func (r *Router) Open(ctx context.Context, path string) (io.ReadCloser, error) {
 	return r.dispatch(path, func(h SchemeHandler) (io.ReadCloser, error) {
 		return h.Open(ctx, path)
+	})
+}
+
+// Stat は指定されたパスのメタデータを返します。
+func (r *Router) Stat(ctx context.Context, path string) (ObjectInfo, error) {
+	return r.dispatch(path, func(h SchemeHandler) (ObjectInfo, error) {
+		return h.Stat(ctx, path)
 	})
 }
 

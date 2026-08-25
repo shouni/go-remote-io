@@ -56,6 +56,20 @@ func (h fileHandler) List(ctx context.Context, uri string, callback func(string)
 	}, settings)
 }
 
+// Stat は file:// URI のメタデータを返します。Path は問い合わせに使った URI に戻します。
+func (h fileHandler) Stat(ctx context.Context, uri string) (ObjectInfo, error) {
+	path, err := toLocalPath(uri)
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	info, err := h.local.Stat(ctx, path)
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	info.Path = uri
+	return info, nil
+}
+
 func (h fileHandler) Exists(ctx context.Context, uri string) (bool, error) {
 	path, err := toLocalPath(uri)
 	if err != nil {

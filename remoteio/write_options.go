@@ -17,6 +17,9 @@ type WriteSettings struct {
 	CacheControl string
 	// ContentDisposition は Content-Disposition ヘッダーです。空なら設定しません。
 	ContentDisposition string
+	// Metadata は任意のユーザー定義メタデータです。空なら設定しません。
+	// ローカルファイルシステムでは保存されず、無視されます。
+	Metadata map[string]string
 }
 
 // WriteOption は Functional Options パターンのための関数型
@@ -42,6 +45,23 @@ func NewWriteSettings(opts ...WriteOption) WriteSettings {
 func WithContentType(contentType string) WriteOption {
 	return func(s *WriteSettings) {
 		s.ContentType = contentType
+	}
+}
+
+// WithMetadata はユーザー定義メタデータを指定する。
+// 複数回渡した場合は積み上がります（同じキーは後勝ち）。
+// ローカル書き込みでは Content-Type などと同じく黙って無視されます。
+func WithMetadata(metadata map[string]string) WriteOption {
+	return func(s *WriteSettings) {
+		if len(metadata) == 0 {
+			return
+		}
+		if s.Metadata == nil {
+			s.Metadata = make(map[string]string, len(metadata))
+		}
+		for k, v := range metadata {
+			s.Metadata[k] = v
+		}
 	}
 }
 

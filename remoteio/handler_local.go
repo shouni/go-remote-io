@@ -87,6 +87,17 @@ func listLocalRecursive(path string, callback func(string) error) error {
 	return nil
 }
 
+// Stat はローカルファイルのメタデータを返します。
+// ローカルファイルシステムは Content-Type を保持しないため、ContentType は空です。
+func (localHandler) Stat(_ context.Context, path string) (ObjectInfo, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		// os.Stat のエラーは os.ErrNotExist を含むため、Open と同じく errors.Is で判定できます。
+		return ObjectInfo{}, fmt.Errorf("ローカルファイルのステータス取得に失敗しました: %w", err)
+	}
+	return ObjectInfo{Path: path, Size: info.Size(), ModTime: info.ModTime()}, nil
+}
+
 // Exists はローカルファイルの存在を確認します。
 func (localHandler) Exists(_ context.Context, path string) (bool, error) {
 	_, err := os.Stat(path)
@@ -115,25 +126,43 @@ func (localHandler) Write(ctx context.Context, path string, contentReader io.Rea
 	)
 
 	outputDir := filepath.Dir(path)
-	if outputDir != "" && outputDir != "." {
+	if outputDir == "" {
+		outputDir = "."
+	}
+	if outputDir != "." {
 		if err := os.MkdirAll(outputDir, 0o755); err != nil {
 			return fmt.Errorf("出力ディレクトリ(%s)の作成に失敗しました: %w", outputDir, err)
 		}
 	}
 
-	file, err := os.Create(path)
+	// 一時ファイルへ書いてから rename します。os.Create に直接書くと、ctx のキャンセルや
+	// I/O エラーで抜けたときに中途半端なファイルが残ります。リモート側は失敗すれば
+	// オブジェクトができないので、ここだけ挙動が違うと呼び出し側が両方に備えることになります。
+	tmp, err := os.CreateTemp(outputDir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("ローカルファイル(%s)の作成に失敗しました: %w", path, err)
 	}
+	tmpName := tmp.Name()
+	// 失敗経路では必ず消します。成功時は rename 済みで Remove は不在エラーになるだけです。
+	defer func() { _ = os.Remove(tmpName) }()
 
 	// os.File への io.Copy は ctx を見ないため、ctxReader を挟んでキャンセルを検知します。
-	if _, err := io.Copy(file, &ctxReader{ctx: ctx, r: contentReader}); err != nil {
-		_ = file.Close()
+	if _, err := io.Copy(tmp, &ctxReader{ctx: ctx, r: contentReader}); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("ローカルファイル(%s)へのコンテンツ書き込み中にエラーが発生しました: %w", path, err)
 	}
 
-	if err := file.Close(); err != nil {
+	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("ローカルファイル(%s)のクローズに失敗しました: %w", path, err)
+	}
+
+	// CreateTemp は 0600 で作るため、os.Create 相当のパーミッションへ戻します。
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return fmt.Errorf("ローカルファイル(%s)のパーミッション設定に失敗しました: %w", path, err)
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("ローカルファイル(%s)の差し替えに失敗しました: %w", path, err)
 	}
 
 	slog.DebugContext(ctx, "ローカル書き込み処理完了", slog.String("path", path))

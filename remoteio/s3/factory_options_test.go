@@ -74,3 +74,24 @@ func TestFactorySchemeHandler(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, remoteio.PrefixS3, handler.Scheme())
 }
+
+// newRouterForEndpoint は、指定エンドポイントへ接続する Router をファクトリ経由で返します。
+func newRouterForEndpoint(t *testing.T, endpoint string) *remoteio.Router {
+	t.Helper()
+
+	factory, err := s3.New(context.Background(),
+		s3.WithEndpoint(endpoint),
+		s3.WithPathStyle(),
+		s3.WithRegion("ap-northeast-1"),
+		s3.WithConfigOptions(awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider("test", "test", ""),
+		)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = factory.Close() })
+
+	handler, err := factory.SchemeHandler()
+	require.NoError(t, err)
+
+	return remoteio.NewSchemeRouter(handler)
+}

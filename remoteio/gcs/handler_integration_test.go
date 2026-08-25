@@ -219,3 +219,51 @@ func TestHandlerNilClient(t *testing.T) {
 		assert.ErrorContains(t, h.Delete(ctx, uri("a.txt")), "未初期化")
 	})
 }
+
+// Stat がサイズ・更新時刻・Content-Type を返すこと。
+// Exists は真偽しか返さないため、これが無いとスキームごとの API を直接叩くことになります。
+func TestHandlerStat(t *testing.T) {
+	ctx := context.Background()
+	server := newFakeServer(t)
+	router := remoteio.NewSchemeRouter(gcs.NewHandler(server.Client()))
+
+	target := uri("stat/report.json")
+	require.NoError(t, router.Write(ctx, target, strings.NewReader(`{"a":1}`),
+		remoteio.WithContentType("application/json"),
+	))
+
+	t.Run("メタデータを返す", func(t *testing.T) {
+		info, err := router.Stat(ctx, target)
+		require.NoError(t, err)
+		assert.Equal(t, target, info.Path)
+		assert.Equal(t, int64(len(`{"a":1}`)), info.Size)
+		assert.Equal(t, "application/json", info.ContentType)
+		assert.False(t, info.ModTime.IsZero())
+	})
+
+	// 不在の判定が Open と揃っていることが、スキーム非依存に扱えるための条件です。
+	t.Run("不在は os.ErrNotExist を包んで返す", func(t *testing.T) {
+		_, err := router.Stat(ctx, uri("stat/missing.json"))
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("オブジェクト名が空の URI は拒否する", func(t *testing.T) {
+		_, err := router.Stat(ctx, remoteio.BuildGCSURI(testBucket, ""))
+		assert.ErrorContains(t, err, "オブジェクト名が空です")
+	})
+}
+
+// WithMetadata がユーザー定義メタデータとして保存されること。
+func TestHandlerWriteMetadata(t *testing.T) {
+	ctx := context.Background()
+	server := newFakeServer(t)
+	router := remoteio.NewSchemeRouter(gcs.NewHandler(server.Client()))
+
+	require.NoError(t, router.Write(ctx, uri("meta/a.txt"), strings.NewReader("x"),
+		remoteio.WithMetadata(map[string]string{"job-id": "42"}),
+	))
+
+	attrs, err := server.Client().Bucket(testBucket).Object("meta/a.txt").Attrs(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"job-id": "42"}, attrs.Metadata)
+}

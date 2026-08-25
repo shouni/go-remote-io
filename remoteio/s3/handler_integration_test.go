@@ -214,3 +214,48 @@ func TestHandlerNilClient(t *testing.T) {
 		assert.ErrorContains(t, h.Delete(ctx, uri("a.txt")), "未初期化")
 	})
 }
+
+// Stat がサイズ・更新時刻・Content-Type を返すこと（GCS 側と対）。
+func TestHandlerStat(t *testing.T) {
+	ctx := context.Background()
+	router := newRouterForEndpoint(t, newFakeS3(t))
+
+	target := uri("stat/report.json")
+	require.NoError(t, router.Write(ctx, target, strings.NewReader(`{"a":1}`),
+		remoteio.WithContentType("application/json"),
+	))
+
+	t.Run("メタデータを返す", func(t *testing.T) {
+		info, err := router.Stat(ctx, target)
+		require.NoError(t, err)
+		assert.Equal(t, target, info.Path)
+		assert.Equal(t, int64(len(`{"a":1}`)), info.Size)
+		assert.Equal(t, "application/json", info.ContentType)
+		assert.False(t, info.ModTime.IsZero())
+	})
+
+	t.Run("不在は os.ErrNotExist を包んで返す", func(t *testing.T) {
+		_, err := router.Stat(ctx, uri("stat/missing.json"))
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("オブジェクト名が空の URI は拒否する", func(t *testing.T) {
+		_, err := router.Stat(ctx, remoteio.BuildS3URI(testBucket, ""))
+		assert.ErrorContains(t, err, "オブジェクト名が空です")
+	})
+}
+
+// WithMetadata がユーザー定義メタデータとして保存され、Stat で読めること。
+func TestHandlerWriteMetadata(t *testing.T) {
+	ctx := context.Background()
+	router := newRouterForEndpoint(t, newFakeS3(t))
+
+	target := uri("meta/a.txt")
+	require.NoError(t, router.Write(ctx, target, strings.NewReader("x"),
+		remoteio.WithMetadata(map[string]string{"job-id": "42"}),
+	))
+
+	info, err := router.Stat(ctx, target)
+	require.NoError(t, err)
+	assert.Equal(t, "42", info.Metadata["job-id"])
+}

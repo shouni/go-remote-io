@@ -154,3 +154,109 @@ func TestOutputWriter_InterfaceSatisfaction(_ *testing.T) {
 	var _ Remover = (*Router)(nil)
 	var _ OutputWriter = (*Router)(nil)
 }
+
+// failingReader は、途中まで読めてから失敗する io.Reader です。
+type failingReader struct {
+	sent bool
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, r.err
+	}
+	r.sent = true
+	return copy(p, []byte("partial")), nil
+}
+
+// 書き込みに失敗しても、中途半端なファイルを残さないこと。
+//
+// 以前は os.Create に直接書いていたため、ctx のキャンセルや I/O エラーで抜けると
+// 途中まで書かれたファイルが残りました。リモート側は失敗すればオブジェクトが
+// できないので、ここだけ挙動が違うと呼び出し側が両方に備えることになります。
+func TestLocalWriteIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	writer := NewSchemeRouter()
+
+	t.Run("失敗しても既存の内容を壊さない", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "existing.txt")
+		require.NoError(t, os.WriteFile(target, []byte("original"), 0o644))
+
+		err := writer.Write(ctx, target, &failingReader{err: assert.AnError})
+		require.ErrorIs(t, err, assert.AnError)
+
+		got, err := os.ReadFile(target)
+		require.NoError(t, err)
+		assert.Equal(t, "original", string(got), "失敗した書き込みが既存の内容を壊しています")
+	})
+
+	t.Run("失敗しても新しいファイルを作らない", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "new.txt")
+
+		err := writer.Write(ctx, target, &failingReader{err: assert.AnError})
+		require.ErrorIs(t, err, assert.AnError)
+
+		assert.NoFileExists(t, target)
+	})
+
+	t.Run("ctx キャンセルでも一時ファイルを残さない", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "canceled.txt")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := writer.Write(ctx, target, bytes.NewReader([]byte("data")))
+		require.Error(t, err)
+
+		entries, err := os.ReadDir(tmpDir)
+		require.NoError(t, err)
+		assert.Empty(t, entries, "一時ファイルが残っています")
+	})
+
+	t.Run("成功したファイルは 0644 で置かれる", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "mode.txt")
+
+		require.NoError(t, writer.Write(ctx, target, bytes.NewReader([]byte("data"))))
+
+		info, err := os.Stat(target)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	})
+}
+
+// WithMetadata は積み上がり、同じキーは後勝ちになること。
+// SchemeHandler の実装側が New*Settings で同じ解決結果を得られる必要があるため、
+// オプションの畳み込み方をここで固定します。
+func TestWithMetadata(t *testing.T) {
+	t.Run("複数回渡すと積み上がる", func(t *testing.T) {
+		settings := NewWriteSettings(
+			WithMetadata(map[string]string{"a": "1"}),
+			WithMetadata(map[string]string{"b": "2"}),
+		)
+		assert.Equal(t, map[string]string{"a": "1", "b": "2"}, settings.Metadata)
+	})
+
+	t.Run("同じキーは後勝ち", func(t *testing.T) {
+		settings := NewWriteSettings(
+			WithMetadata(map[string]string{"a": "1"}),
+			WithMetadata(map[string]string{"a": "2"}),
+		)
+		assert.Equal(t, map[string]string{"a": "2"}, settings.Metadata)
+	})
+
+	t.Run("空を渡しても nil のまま", func(t *testing.T) {
+		assert.Nil(t, NewWriteSettings(WithMetadata(nil)).Metadata)
+	})
+
+	// 渡した map を後から書き換えても設定に影響しないこと。
+	t.Run("渡した map は取り込まれる", func(t *testing.T) {
+		source := map[string]string{"a": "1"}
+		settings := NewWriteSettings(WithMetadata(source))
+		source["a"] = "changed"
+		assert.Equal(t, "1", settings.Metadata["a"])
+	})
+}

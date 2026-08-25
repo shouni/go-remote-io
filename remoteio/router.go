@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -47,12 +49,9 @@ func NewRouter(handlers ...SchemeHandler) *Router {
 }
 
 // Schemes は登録済みのスキームを返します（フォールバックは含みません）。
+// 呼ぶたびに順序が変わらないよう、辞書順にそろえて返します。
 func (r *Router) Schemes() []string {
-	schemes := make([]string, 0, len(r.handlers))
-	for scheme := range r.handlers {
-		schemes = append(schemes, scheme)
-	}
-	return schemes
+	return slices.Sorted(maps.Keys(r.handlers))
 }
 
 // resolve は path を担当するハンドラを返します。
@@ -111,29 +110,33 @@ func (r *Router) Exists(ctx context.Context, path string) (bool, error) {
 
 // List は指定されたパス配下のリソースを列挙し、コールバックへ渡します。
 func (r *Router) List(ctx context.Context, path string, callback func(string) error, opts ...ListOption) error {
-	handler, err := r.resolve(path)
-	if err != nil {
-		return err
-	}
-	return handler.List(ctx, path, callback, NewListSettings(opts...))
+	return r.run(path, func(h SchemeHandler) error {
+		return h.List(ctx, path, callback, NewListSettings(opts...))
+	})
 }
 
 // Write は指定されたパスへデータを書き込みます。
 func (r *Router) Write(ctx context.Context, path string, contentReader io.Reader, opts ...WriteOption) error {
-	handler, err := r.resolve(path)
-	if err != nil {
-		return err
-	}
-	return handler.Write(ctx, path, contentReader, NewWriteSettings(opts...))
+	return r.run(path, func(h SchemeHandler) error {
+		return h.Write(ctx, path, contentReader, NewWriteSettings(opts...))
+	})
 }
 
 // Delete は指定されたパスのリソースを削除します。
 func (r *Router) Delete(ctx context.Context, path string) error {
+	return r.run(path, func(h SchemeHandler) error {
+		return h.Delete(ctx, path)
+	})
+}
+
+// run は、ハンドラを解決して値を返さない操作へ委譲します。
+// dispatch と対になる、戻り値を持たない操作のための版です。
+func (r *Router) run(path string, fn func(SchemeHandler) error) error {
 	handler, err := r.resolve(path)
 	if err != nil {
 		return err
 	}
-	return handler.Delete(ctx, path)
+	return fn(handler)
 }
 
 // dispatch は、ハンドラを解決して値を返す操作へ委譲します。

@@ -5,11 +5,35 @@ import (
 	"strings"
 )
 
+// スキームの語彙はここに集約します。名前 (schemeGCS) を正とし、区切りまで含む
+// プレフィックス (PrefixGCS) はそこから導出するため、1 スキームにつきリテラルは
+// 1 つだけです。
+//
+// 公開するのはプレフィックス側だけです。このライブラリの API が「スキーム」として
+// 受け渡しするのは SchemePrefix の戻り値・SchemeHandler.Scheme()・Router の
+// 登録キーで、いずれも区切りを含む "gs://" の形だからです。名前 ("gs") を公開すると
+// 呼び出し側がその形を手に入れるのに "://" を自前で足すことになり、足し忘れれば
+// "gsfoo://..." のような別スキームまで前方一致で拾ってしまいます。
+//
+// 名前の形が必要になったら strings.TrimSuffix(PrefixGCS, "://") で足りますが、
+// 実需が出てから公開しても遅くありません（公開 API は足すより消す方が高くつきます）。
 const (
+	// schemeSeparator は URI のスキームと本体の区切りです。
+	schemeSeparator = "://"
+
+	// schemeGCS は Google Cloud Storage のスキーム名です（区切りを含みません）。
+	schemeGCS = "gs"
+	// schemeS3 は Amazon S3 のスキーム名です（区切りを含みません）。
+	schemeS3 = "s3"
+	// schemeFile は file:// のスキーム名です（区切りを含みません）。
+	schemeFile = "file"
+
 	// PrefixGCS は Google Cloud Storage の URI スキームプレフィックスです。
-	PrefixGCS = "gs://"
+	PrefixGCS = schemeGCS + schemeSeparator
 	// PrefixS3 は Amazon S3 の URI スキームプレフィックスです。
-	PrefixS3 = "s3://"
+	PrefixS3 = schemeS3 + schemeSeparator
+	// PrefixFile は file:// スキームのプレフィックスです。
+	PrefixFile = schemeFile + schemeSeparator
 )
 
 // IsRemoteURI は対応しているいずれかのスキームであれば true を返します

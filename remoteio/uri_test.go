@@ -1,6 +1,8 @@
 package remoteio
 
 import (
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -271,4 +273,43 @@ func TestBuildURIWithArbitraryScheme(t *testing.T) {
 	assert.Equal(t, "azure://b/a/c.txt", BuildURI("azure://", "b", "a/c.txt"))
 	assert.Equal(t, "azure://b", BuildURI("azure://", "b", ""))
 	assert.Equal(t, "azure://b/a.txt", BuildURI("azure://", "b", "/a.txt"))
+}
+
+// TestSchemeConstants は、公開しているスキームプレフィックスの綴りを固定します。
+//
+// プレフィックスは非公開の名前定数から導出しているため、名前を書き換えると
+// プレフィックスが黙って変わります。gs:// / s3:// / file:// は URI として外部に
+// 出る値なので、実際の綴りをここで押さえます。
+func TestSchemeConstants(t *testing.T) {
+	tests := []struct {
+		name       string
+		prefix     string
+		wantScheme string
+	}{
+		{name: "GCS", prefix: PrefixGCS, wantScheme: "gs"},
+		{name: "S3", prefix: PrefixS3, wantScheme: "s3"},
+		{name: "file", prefix: PrefixFile, wantScheme: "file"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantScheme+"://", tt.prefix, "プレフィックス")
+
+			// SchemePrefix はプレフィックス側と同じ形を返すこと（Router の登録キー）。
+			assert.Equal(t, tt.prefix, SchemePrefix(tt.prefix+"bucket/obj.txt"))
+		})
+	}
+}
+
+// TestSchemeConstantsMatchNetURL は、プレフィックスから区切りを落とした形が
+// net/url の url.URL.Scheme と一致することを確認します。名前の形が必要な呼び出し側は
+// strings.TrimSuffix(PrefixGCS, "://") で得るので、そこがずれると使えなくなります。
+func TestSchemeConstantsMatchNetURL(t *testing.T) {
+	for _, prefix := range []string{PrefixGCS, PrefixS3, PrefixFile} {
+		t.Run(prefix, func(t *testing.T) {
+			u, err := url.Parse(prefix + "bucket/obj.txt")
+			require.NoError(t, err)
+			assert.Equal(t, strings.TrimSuffix(prefix, "://"), u.Scheme)
+		})
+	}
 }

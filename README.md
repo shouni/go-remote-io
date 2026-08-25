@@ -212,6 +212,23 @@ Go Remote IO は、役割ごとに細分化されたインターフェースを�
 
 URI の判定・組み立てには、スキームを問わない `ParseBucketURI` / `BuildURI` / `ParseSchemeURI` / `ParseSchemeObjectURI` / `SchemePrefix` と、`gs://` / `s3://` 向けの `IsGCSURI` / `IsS3URI` / `IsRemoteURI` / `ParseRemoteURI` / `BuildGCSURI` / `BuildS3URI` を用意しています。
 
+スキームの定数は、区切りまで含む**プレフィックス**の形だけを公開しています。
+
+| 定数 | 値 | 使いどころ |
+| :-- | :-- | :-- |
+| `PrefixGCS` / `PrefixS3` / `PrefixFile` | `"gs://"` | URI の前方一致、`SchemeHandler.Scheme()`、`Router` の登録キー |
+
+このライブラリが「スキーム」として受け渡しする値 — `SchemePrefix` の戻り値、`SchemeHandler.Scheme()`、`Router.Schemes()`、`gcs.Scheme` / `s3.Scheme` — はすべてこの形です。振り分けは `url.Parse` を通さず `SchemePrefix` で足ります。
+
+```go
+switch remoteio.SchemePrefix(uri) {
+case remoteio.PrefixGCS, remoteio.PrefixS3:
+    // クラウドストレージ
+}
+```
+
+区切りを含まない名前 (`"gs"`) は公開していません。`url.URL.Scheme` と突き合わせるなど名前の形が要るときは、`strings.TrimSuffix(remoteio.PrefixGCS, "://")` で落としてください。
+
 パスの操作には `ResolveBaseDir`（親ディレクトリ）、`ResolvePath`（結合）、`GenerateIndexedPath`（拡張子の前に連番を挿入）があります。リモート URI は URL ではなく「スキーム + バケット + 生のキー」として扱うため、オブジェクト名に含まれる空白や `?` はエンコードされません。
 
 設定から読んだバケット**名**は `NormalizeBucketName` を通してから `BuildGCSURI` / `BuildS3URI` へ渡してください。これらは受け取った値をそのまま連結するため、コンソールから貼った `gs://my-bucket/` を素通しすると `gs://gs://my-bucket//path` という URI ができ、失敗するのは書き込みの時点になります。

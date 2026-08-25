@@ -9,9 +9,6 @@ import (
 	"strings"
 )
 
-// schemeSeparator は URI スキームの区切りです。
-const schemeSeparator = "://"
-
 // Router は、URI のスキームを見て対応する SchemeHandler へ処理を委譲します。
 // InputReader と OutputWriter の両方を満たします。
 //

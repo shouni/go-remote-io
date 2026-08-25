@@ -9,9 +9,6 @@ import (
 	"strings"
 )
 
-// PrefixFile は file:// スキームのプレフィックスです。
-const PrefixFile = "file://"
-
 // fileHandler は file:// URI をローカルパスへ読み替えて localHandler へ委譲します。
 //
 // ローカルは「スキームを持たないパス」のフォールバックとして扱っていますが、

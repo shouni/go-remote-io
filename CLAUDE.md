@@ -86,6 +86,16 @@ go test -run 'TestRouterLocal/List: stops and returns callback error' ./remoteio
 * ローカル書き込みは同じディレクトリの一時ファイルへ書いてから `os.Rename` します。`os.Create` へ直接書くと、キャンセルや I/O エラーで抜けたときに中途半端なファイルが残ります。リモート側は失敗すればオブジェクトができないので、ここだけ挙動が違うと呼び出し側が両方に備えることになります。`os.CreateTemp` は 0600 で作るため、`rename` の前に 0644 へ戻しています。
 * ハンドラは担当外のスキームを拒否します (`ParseSchemeURI`)。`Router` 経由なら振り分けの時点で弾かれますが、ハンドラは公開されているため直接呼ばれる余地があります。以前は `gcs.Handler.Open(ctx, "s3://b/k")` が GCS のバケット b を読んでいました。
 
+### スキームの語彙はプレフィックスの形だけを公開する
+
+スキームの定数は `remoteio/uri.go` の 1 ブロックに集約しています。**名前 (`schemeGCS = "gs"`) を正とし、プレフィックス (`PrefixGCS`) は `schemeGCS + schemeSeparator` で導出**するため、1 スキームにつきリテラルは 1 つだけです。定数を増やすときもこの形に従ってください。
+
+**公開するのはプレフィックス側 (`PrefixGCS` / `PrefixS3` / `PrefixFile`) だけです。** 名前と区切りは非公開 (`schemeGCS` / `schemeSeparator`) にしてあります。このライブラリが「スキーム」として受け渡しする値 — `SchemePrefix` の戻り値、`SchemeHandler.Scheme()`、`Router` の登録キー、`gcs.Scheme` / `s3.Scheme` — がすべて `"gs://"` の形だからです。名前を公開すると、呼び出し側がその形を得るのに `"://"` を自前で足すことになり、足し忘れれば `"gsfoo://..."` のような別スキームまで前方一致で拾います。名前の形が要るときは `strings.TrimSuffix(PrefixGCS, "://")` で足ります。
+
+一度は両方を公開していましたが（`SchemeGCS` / `SchemeSeparator`）、名前の形はプレフィックスの導出以外にライブラリ内でも利用者側でも使われず、実需のないまま公開 API を増やしただけでした。**必要になってから足してください** — 公開 API は足すより消す方が高くつきます。
+
+> **語彙の注意**: このライブラリで「スキーム」と言うとき、`SchemeHandler.Scheme()` / `Router.Schemes()` / `gcs.Scheme` が指すのは**プレフィックス** (`"gs://"`) です。RFC 3986 的には区切りを含まない `"gs"` の方が scheme ですが、これらは公開済み API のため改名していません。新しい API を足すときは、どちらの形かを doc コメントで明示してください。
+
 ### URI とパスのユーティリティ
 
 * URI の分解はスキーム非依存の `ParseBucketURI` / `BuildURI` (`remoteio/uri.go`) が土台で、`ParseRemoteURI` / `BuildGCSURI` / `BuildS3URI` はその上の薄いラッパーです。`SchemeHandler` と `Router` がスキーム非依存なのに分解だけ `gs://` / `s3://` 直書きだと、第三者が新しいスキームのハンドラを書いたときに「どこからがバケット名か」の解釈がずれます。

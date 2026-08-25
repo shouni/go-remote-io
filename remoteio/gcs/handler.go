@@ -52,10 +52,7 @@ func (h *Handler) Open(ctx context.Context, gcsURI string) (io.ReadCloser, error
 
 // List は prefix 配下のオブジェクトを列挙します。
 func (h *Handler) List(ctx context.Context, gcsURI string, callback func(string) error, settings remoteio.ListSettings) error {
-	if h.client == nil {
-		return fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
-	}
-	bucketName, prefix, err := remoteio.ParseRemoteURI(gcsURI)
+	bucketName, prefix, err := h.parseBucketURI(gcsURI)
 	if err != nil {
 		return err
 	}
@@ -153,20 +150,20 @@ func (h *Handler) Delete(ctx context.Context, gcsURI string) error {
 	return nil
 }
 
+// parseBucketURI は URI を検証してバケット名とプレフィックスに分解します（オブジェクト名は空でも可）。
+// 一覧のように prefix が空でも意味を持つ操作で使います。
+func (h *Handler) parseBucketURI(gcsURI string) (bucket, prefix string, err error) {
+	if h.client == nil {
+		return "", "", fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
+	}
+	return remoteio.ParseSchemeURI(Scheme, gcsURI)
+}
+
 // parseObjectURI は URI を検証してバケット名とオブジェクト名に分解します。
-//
-// オブジェクト名が空の URI (gs://bucket) を拒否するのは、バケット操作と取り違えたり、
-// 不在なのか URI が不正なのか区別できなくなるのを防ぐためです。
+// オブジェクト名が空の URI (gs://bucket) を拒否する理由は ParseSchemeObjectURI を参照してください。
 func (h *Handler) parseObjectURI(gcsURI string) (bucket, object string, err error) {
 	if h.client == nil {
 		return "", "", fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
-	bucket, object, err = remoteio.ParseRemoteURI(gcsURI)
-	if err != nil {
-		return "", "", err
-	}
-	if object == "" {
-		return "", "", fmt.Errorf("オブジェクト名が空です: %s", gcsURI)
-	}
-	return bucket, object, nil
+	return remoteio.ParseSchemeObjectURI(Scheme, gcsURI)
 }

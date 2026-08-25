@@ -56,10 +56,7 @@ func (h *Handler) Open(ctx context.Context, s3URI string) (io.ReadCloser, error)
 
 // List は prefix 配下のオブジェクトを列挙します。
 func (h *Handler) List(ctx context.Context, s3URI string, callback func(string) error, settings remoteio.ListSettings) error {
-	if h.client == nil {
-		return fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
-	}
-	bucketName, prefix, err := remoteio.ParseRemoteURI(s3URI)
+	bucketName, prefix, err := h.parseBucketURI(s3URI)
 	if err != nil {
 		return err
 	}
@@ -176,20 +173,20 @@ func (h *Handler) Delete(ctx context.Context, s3URI string) error {
 	return nil
 }
 
+// parseBucketURI は URI を検証してバケット名とプレフィックスに分解します（オブジェクト名は空でも可）。
+// 一覧のように prefix が空でも意味を持つ操作で使います。
+func (h *Handler) parseBucketURI(s3URI string) (bucket, prefix string, err error) {
+	if h.client == nil {
+		return "", "", fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
+	}
+	return remoteio.ParseSchemeURI(Scheme, s3URI)
+}
+
 // parseObjectURI は URI を検証してバケット名とオブジェクト名に分解します。
-//
-// オブジェクト名が空の URI (s3://bucket) を拒否するのは、バケット操作と取り違えたり、
-// 不在なのか URI が不正なのか区別できなくなるのを防ぐためです。
+// オブジェクト名が空の URI (s3://bucket) を拒否する理由は ParseSchemeObjectURI を参照してください。
 func (h *Handler) parseObjectURI(s3URI string) (bucket, object string, err error) {
 	if h.client == nil {
 		return "", "", fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
-	bucket, object, err = remoteio.ParseRemoteURI(s3URI)
-	if err != nil {
-		return "", "", err
-	}
-	if object == "" {
-		return "", "", fmt.Errorf("オブジェクト名が空です: %s", s3URI)
-	}
-	return bucket, object, nil
+	return remoteio.ParseSchemeObjectURI(Scheme, s3URI)
 }

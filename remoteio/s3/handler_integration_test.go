@@ -188,3 +188,29 @@ func TestRouterRejectsUnregisteredScheme(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "未対応のURIスキームです")
 }
+
+// nil クライアントでも panic せず、他の操作と同じくエラーで返ること（GCS 側と対）。
+func TestHandlerNilClient(t *testing.T) {
+	ctx := context.Background()
+	h := s3.NewHandler(nil)
+
+	t.Run("Open", func(t *testing.T) {
+		_, err := h.Open(ctx, uri("a.txt"))
+		assert.ErrorContains(t, err, "未初期化")
+	})
+	t.Run("List", func(t *testing.T) {
+		err := h.List(ctx, uri("a"), func(string) error { return nil }, remoteio.NewListSettings())
+		assert.ErrorContains(t, err, "未初期化")
+	})
+	t.Run("Exists", func(t *testing.T) {
+		_, err := h.Exists(ctx, uri("a.txt"))
+		assert.ErrorContains(t, err, "未初期化")
+	})
+	t.Run("Write", func(t *testing.T) {
+		err := h.Write(ctx, uri("a.txt"), strings.NewReader("x"), remoteio.NewWriteSettings())
+		assert.ErrorContains(t, err, "未初期化")
+	})
+	t.Run("Delete", func(t *testing.T) {
+		assert.ErrorContains(t, h.Delete(ctx, uri("a.txt")), "未初期化")
+	})
+}

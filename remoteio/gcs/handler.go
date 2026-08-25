@@ -52,6 +52,9 @@ func (h *Handler) Open(ctx context.Context, gcsURI string) (io.ReadCloser, error
 
 // List は prefix 配下のオブジェクトを列挙します。
 func (h *Handler) List(ctx context.Context, gcsURI string, callback func(string) error, settings remoteio.ListSettings) error {
+	if h.client == nil {
+		return fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
+	}
 	bucketName, prefix, err := remoteio.ParseRemoteURI(gcsURI)
 	if err != nil {
 		return err

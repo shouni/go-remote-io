@@ -89,14 +89,14 @@ func SchemePrefix(path string) string {
 
 // Open は指定されたパスに対応する読み取りストリームを返します。
 func (r *Router) Open(ctx context.Context, path string) (io.ReadCloser, error) {
-	return dispatch(r, path, func(h SchemeHandler) (io.ReadCloser, error) {
+	return r.dispatch(path, func(h SchemeHandler) (io.ReadCloser, error) {
 		return h.Open(ctx, path)
 	})
 }
 
 // Exists は指定されたパスにリソースが存在するかを確認します。
 func (r *Router) Exists(ctx context.Context, path string) (bool, error) {
-	return dispatch(r, path, func(h SchemeHandler) (bool, error) {
+	return r.dispatch(path, func(h SchemeHandler) (bool, error) {
 		return h.Exists(ctx, path)
 	})
 }
@@ -130,7 +130,10 @@ func (r *Router) Delete(ctx context.Context, path string) error {
 
 // dispatch は、ハンドラを解決して値を返す操作へ委譲します。
 // 解決に失敗したときの戻り値をゼロ値で揃えるためだけの補助です。
-func dispatch[T any](r *Router, path string, fn func(SchemeHandler) (T, error)) (T, error) {
+//
+// Go 1.27 でメソッドが型パラメータを持てるようになったため、レシーバを
+// 第 1 引数で受け取る関数ではなくメソッドとして書けます。
+func (r *Router) dispatch[T any](path string, fn func(SchemeHandler) (T, error)) (T, error) {
 	handler, err := r.resolve(path)
 	if err != nil {
 		var zero T

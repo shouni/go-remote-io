@@ -245,3 +245,52 @@ func TestListSettingsIsInterpretableByImplementors(t *testing.T) {
 	assert.Empty(t, NewListSettings().Delimiter, "オプション無しでは再帰列挙")
 	assert.Empty(t, NewListSettings(nil).Delimiter, "nil オプションで落ちてはいけない")
 }
+
+// Schemes は呼ぶたびに同じ順序で返ること。
+// map の反復順のままだと、公開 API なのに結果が呼び出しごとに変わります。
+func TestRouterSchemesIsSorted(t *testing.T) {
+	router := NewRouter(
+		stubSchemeHandler{scheme: "s3://"},
+		stubSchemeHandler{scheme: "gs://"},
+		stubSchemeHandler{scheme: "azure://"},
+		NewLocalHandler(),
+	)
+
+	want := []string{"azure://", "gs://", "s3://"}
+	for range 5 {
+		assert.Equal(t, want, router.Schemes())
+	}
+}
+
+// stubSchemeHandler は、担当スキームだけを申告する SchemeHandler です。
+type stubSchemeHandler struct {
+	scheme string
+}
+
+var _ SchemeHandler = stubSchemeHandler{}
+
+func (h stubSchemeHandler) Scheme() string { return h.scheme }
+
+func (stubSchemeHandler) Open(context.Context, string) (io.ReadCloser, error) {
+	return nil, errNotImplemented
+}
+
+func (stubSchemeHandler) Stat(context.Context, string) (ObjectInfo, error) {
+	return ObjectInfo{}, errNotImplemented
+}
+
+func (stubSchemeHandler) List(context.Context, string, func(string) error, ListSettings) error {
+	return errNotImplemented
+}
+
+func (stubSchemeHandler) Exists(context.Context, string) (bool, error) {
+	return false, errNotImplemented
+}
+
+func (stubSchemeHandler) Write(context.Context, string, io.Reader, WriteSettings) error {
+	return errNotImplemented
+}
+
+func (stubSchemeHandler) Delete(context.Context, string) error { return errNotImplemented }
+
+var errNotImplemented = errors.New("未実装")

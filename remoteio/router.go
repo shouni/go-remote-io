@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -24,6 +26,7 @@ type Router struct {
 var (
 	_ InputReader  = (*Router)(nil)
 	_ OutputWriter = (*Router)(nil)
+	_ Stater       = (*Router)(nil)
 )
 
 // NewRouter は、渡されたハンドラを担当スキームごとに登録した Router を返します。
@@ -46,12 +49,9 @@ func NewRouter(handlers ...SchemeHandler) *Router {
 }
 
 // Schemes は登録済みのスキームを返します（フォールバックは含みません）。
+// 呼ぶたびに順序が変わらないよう、辞書順にそろえて返します。
 func (r *Router) Schemes() []string {
-	schemes := make([]string, 0, len(r.handlers))
-	for scheme := range r.handlers {
-		schemes = append(schemes, scheme)
-	}
-	return schemes
+	return slices.Sorted(maps.Keys(r.handlers))
 }
 
 // resolve は path を担当するハンドラを返します。
@@ -89,48 +89,62 @@ func SchemePrefix(path string) string {
 
 // Open は指定されたパスに対応する読み取りストリームを返します。
 func (r *Router) Open(ctx context.Context, path string) (io.ReadCloser, error) {
-	return dispatch(r, path, func(h SchemeHandler) (io.ReadCloser, error) {
+	return r.dispatch(path, func(h SchemeHandler) (io.ReadCloser, error) {
 		return h.Open(ctx, path)
+	})
+}
+
+// Stat は指定されたパスのメタデータを返します。
+func (r *Router) Stat(ctx context.Context, path string) (ObjectInfo, error) {
+	return r.dispatch(path, func(h SchemeHandler) (ObjectInfo, error) {
+		return h.Stat(ctx, path)
 	})
 }
 
 // Exists は指定されたパスにリソースが存在するかを確認します。
 func (r *Router) Exists(ctx context.Context, path string) (bool, error) {
-	return dispatch(r, path, func(h SchemeHandler) (bool, error) {
+	return r.dispatch(path, func(h SchemeHandler) (bool, error) {
 		return h.Exists(ctx, path)
 	})
 }
 
 // List は指定されたパス配下のリソースを列挙し、コールバックへ渡します。
 func (r *Router) List(ctx context.Context, path string, callback func(string) error, opts ...ListOption) error {
-	handler, err := r.resolve(path)
-	if err != nil {
-		return err
-	}
-	return handler.List(ctx, path, callback, NewListSettings(opts...))
+	return r.run(path, func(h SchemeHandler) error {
+		return h.List(ctx, path, callback, NewListSettings(opts...))
+	})
 }
 
 // Write は指定されたパスへデータを書き込みます。
 func (r *Router) Write(ctx context.Context, path string, contentReader io.Reader, opts ...WriteOption) error {
-	handler, err := r.resolve(path)
-	if err != nil {
-		return err
-	}
-	return handler.Write(ctx, path, contentReader, NewWriteSettings(opts...))
+	return r.run(path, func(h SchemeHandler) error {
+		return h.Write(ctx, path, contentReader, NewWriteSettings(opts...))
+	})
 }
 
 // Delete は指定されたパスのリソースを削除します。
 func (r *Router) Delete(ctx context.Context, path string) error {
+	return r.run(path, func(h SchemeHandler) error {
+		return h.Delete(ctx, path)
+	})
+}
+
+// run は、ハンドラを解決して値を返さない操作へ委譲します。
+// dispatch と対になる、戻り値を持たない操作のための版です。
+func (r *Router) run(path string, fn func(SchemeHandler) error) error {
 	handler, err := r.resolve(path)
 	if err != nil {
 		return err
 	}
-	return handler.Delete(ctx, path)
+	return fn(handler)
 }
 
 // dispatch は、ハンドラを解決して値を返す操作へ委譲します。
 // 解決に失敗したときの戻り値をゼロ値で揃えるためだけの補助です。
-func dispatch[T any](r *Router, path string, fn func(SchemeHandler) (T, error)) (T, error) {
+//
+// Go 1.27 でメソッドが型パラメータを持てるようになったため、レシーバを
+// 第 1 引数で受け取る関数ではなくメソッドとして書けます。
+func (r *Router) dispatch[T any](path string, fn func(SchemeHandler) (T, error)) (T, error) {
 	handler, err := r.resolve(path)
 	if err != nil {
 		var zero T

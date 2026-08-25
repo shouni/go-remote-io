@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestParseRemoteURI は GCS と S3 両方のパースロジックを検証します
@@ -187,4 +188,87 @@ func TestNormalizeBucketNameFeedsBuildGCSURI(t *testing.T) {
 	if want := "gs://my-bucket/reviews/1.json"; got != want {
 		t.Errorf("BuildGCSURI = %q, want %q", got, want)
 	}
+}
+
+// スキームを固定しない分解。第三者が新しいスキームのハンドラを書けるように公開しています。
+func TestParseBucketURI(t *testing.T) {
+	tests := []struct {
+		name       string
+		uri        string
+		wantScheme string
+		wantBucket string
+		wantPath   string
+		wantErr    bool
+	}{
+		{name: "GCS", uri: "gs://b/a/c.txt", wantScheme: "gs://", wantBucket: "b", wantPath: "a/c.txt"},
+		{name: "S3", uri: "s3://b/a/c.txt", wantScheme: "s3://", wantBucket: "b", wantPath: "a/c.txt"},
+		{
+			// ParseRemoteURI と違い、未知のスキームも分解できます。
+			name: "未知のスキームでも分解する", uri: "azure://b/a.txt",
+			wantScheme: "azure://", wantBucket: "b", wantPath: "a.txt",
+		},
+		{name: "バケットのみ", uri: "gs://b", wantScheme: "gs://", wantBucket: "b", wantPath: ""},
+		{name: "末尾スラッシュ", uri: "gs://b/", wantScheme: "gs://", wantBucket: "b", wantPath: ""},
+		{name: "キーに空白や ? があってもそのまま", uri: "gs://b/my dir/a?b.txt", wantScheme: "gs://", wantBucket: "b", wantPath: "my dir/a?b.txt"},
+		{name: "スキームなしはエラー", uri: "/local/path", wantErr: true},
+		{name: "バケット名が空はエラー", uri: "gs:///a.txt", wantErr: true},
+		{name: "スキームだけはエラー", uri: "gs://", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme, bucket, path, err := ParseBucketURI(tt.uri)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantScheme, scheme)
+			assert.Equal(t, tt.wantBucket, bucket)
+			assert.Equal(t, tt.wantPath, path)
+		})
+	}
+}
+
+// ハンドラが担当外のスキームを受け取ったまま処理してしまうのを防ぐための検証。
+func TestParseSchemeURI(t *testing.T) {
+	t.Run("スキームが一致すれば分解する", func(t *testing.T) {
+		bucket, path, err := ParseSchemeURI(PrefixGCS, "gs://b/a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "b", bucket)
+		assert.Equal(t, "a.txt", path)
+	})
+
+	// これが無いと、gcs.Handler に s3:// を直接渡したとき GCS のバケットを触ります。
+	t.Run("スキームが違えばエラー", func(t *testing.T) {
+		_, _, err := ParseSchemeURI(PrefixGCS, "s3://b/a.txt")
+		assert.ErrorContains(t, err, "スキームが一致しません")
+	})
+
+	t.Run("プレフィックスは空でもよい", func(t *testing.T) {
+		_, path, err := ParseSchemeURI(PrefixGCS, "gs://b")
+		require.NoError(t, err)
+		assert.Empty(t, path)
+	})
+}
+
+func TestParseSchemeObjectURI(t *testing.T) {
+	t.Run("オブジェクト名があれば分解する", func(t *testing.T) {
+		bucket, object, err := ParseSchemeObjectURI(PrefixS3, "s3://b/a/c.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "b", bucket)
+		assert.Equal(t, "a/c.txt", object)
+	})
+
+	// 不在なのか URI が不正なのか区別できなくなるため、バケットだけの URI は拒否します。
+	t.Run("オブジェクト名が空ならエラー", func(t *testing.T) {
+		_, _, err := ParseSchemeObjectURI(PrefixS3, "s3://b")
+		assert.ErrorContains(t, err, "オブジェクト名が空です")
+	})
+}
+
+func TestBuildURIWithArbitraryScheme(t *testing.T) {
+	assert.Equal(t, "azure://b/a/c.txt", BuildURI("azure://", "b", "a/c.txt"))
+	assert.Equal(t, "azure://b", BuildURI("azure://", "b", ""))
+	assert.Equal(t, "azure://b/a.txt", BuildURI("azure://", "b", "/a.txt"))
 }

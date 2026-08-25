@@ -2,30 +2,36 @@ package remoteio
 
 import (
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"strings"
 )
 
 // ResolveBaseDir は、入力パスから親ディレクトリのパスを抽出し、
-// 末尾がセパレータ（URL なら /、ローカルなら OS 依存）で終わるように正規化します。
+// 末尾がセパレータ（リモートなら /、ローカルなら OS 依存）で終わるように正規化します。
+//
+// リモート URI を net/url で扱わないのは、gs:// / s3:// が URL ではないためです。
+// オブジェクト名は任意のバイト列で、空白も ? も正当な文字ですが、URL として
+// 組み直すとそれぞれ %20 とクエリ区切りに化けます。ParseRemoteURI はデコードを
+// しないため、化けた URI はエラーにならずに別のキーを指してしまいます。
+//
+// スキームの判定は SchemePrefix と同じく "://" の有無で行うため、"mailto:" のような
+// 二重スラッシュを持たない URI はローカルパスとして扱われます。
 func ResolveBaseDir(rawPath string) string {
 	if rawPath == "" {
 		return ""
 	}
 
-	u, err := url.Parse(rawPath)
-	// スキームがある場合は URL として処理
-	if err == nil && u.Scheme != "" {
-		// ディレクトリ構造を取得するためにパスの末尾を調整
-		if !strings.HasSuffix(u.Path, "/") {
-			u.Path = filepath.Dir(u.Path)
+	if scheme := SchemePrefix(rawPath); scheme != "" {
+		body := rawPath[len(scheme):]
+		if strings.HasSuffix(body, "/") {
+			return rawPath
 		}
-		baseURL := u.String()
-		if !strings.HasSuffix(baseURL, "/") {
-			baseURL += "/"
+		i := strings.LastIndex(body, "/")
+		if i < 0 {
+			// gs://bucket のようにキーを持たない URI。バケット直下を指します。
+			return rawPath + "/"
 		}
-		return baseURL
+		return scheme + body[:i+1]
 	}
 
 	// ローカルファイルパスとして処理
@@ -42,16 +48,20 @@ func ResolveBaseDir(rawPath string) string {
 
 // ResolvePath は、ベースディレクトリとファイル名を結合します。
 //
-// スキーム付き（gs:// / s3:// / http:// など）なら URL として、それ以外はローカルパスとして
-// 結合します。判定に SchemePrefix を使うのは、ローカル用の filepath.Join が連続する
-// スラッシュを畳んでしまい、`gs://bucket/a` が `gs:/bucket/a` に化けるためです。
+// スキーム付き（gs:// / s3:// など）なら "/" で、それ以外はローカルパスとして結合します。
+// リモート側で filepath.Join も url.JoinPath も使わないのは、前者が連続するスラッシュを
+// 畳んで `gs://bucket/a` を `gs:/bucket/a` に化けさせ、後者がオブジェクト名を
+// パーセントエンコードしてしまうためです（ResolveBaseDir のコメント参照）。
+//
+// 戻り値のエラーは常に nil ですが、シグネチャは互換のために残しています。
 func ResolvePath(baseDir, fileName string) (string, error) {
 	if SchemePrefix(baseDir) != "" {
-		result, err := url.JoinPath(baseDir, fileName)
-		if err != nil {
-			return "", fmt.Errorf("リモートストレージパスの結合に失敗: %w", err)
+		base := strings.TrimSuffix(baseDir, "/")
+		name := strings.TrimPrefix(fileName, "/")
+		if name == "" {
+			return base, nil
 		}
-		return result, nil
+		return base + "/" + name, nil
 	}
 
 	return filepath.Join(baseDir, fileName), nil
@@ -59,12 +69,15 @@ func ResolvePath(baseDir, fileName string) (string, error) {
 
 // GenerateIndexedPath は、指定されたパスの拡張子の前に連番を挿入します。
 // 例: "path/to/image.png", 1 -> "path/to/image_1.png"
+//
+// 拡張子は最後のセパレータより後ろの最後の "." 以降を指します（filepath.Ext と同じ）。
+// リモート URI もローカルパスも同じ規則で扱うため、"gs://b/dir.v2/name" のように
+// ディレクトリ側にだけ "." がある場合は拡張子なしとして扱われます。
 func GenerateIndexedPath(basePath string, index int) (string, error) {
 	if index <= 0 {
 		return "", fmt.Errorf("インデックスは1以上の整数である必要があります: %d", index)
 	}
 
-	// URL の場合は Path 部分のみ、ローカルなら全体から拡張子を取得
 	ext := filepath.Ext(basePath)
 	mainPath := strings.TrimSuffix(basePath, ext)
 

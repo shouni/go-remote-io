@@ -19,6 +19,7 @@ type SchemeHandler interface {
 	Scheme() string
 
 	Open(ctx context.Context, path string) (io.ReadCloser, error)
+	Stat(ctx context.Context, path string) (ObjectInfo, error)
 	List(ctx context.Context, path string, callback func(string) error, settings ListSettings) error
 	Exists(ctx context.Context, path string) (bool, error)
 	Write(ctx context.Context, path string, contentReader io.Reader, settings WriteSettings) error

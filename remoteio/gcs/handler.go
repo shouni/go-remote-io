@@ -52,7 +52,7 @@ func (h *Handler) Open(ctx context.Context, gcsURI string) (io.ReadCloser, error
 
 // List は prefix 配下のオブジェクトを列挙します。
 func (h *Handler) List(ctx context.Context, gcsURI string, callback func(string) error, settings remoteio.ListSettings) error {
-	bucketName, prefix, err := remoteio.ParseRemoteURI(gcsURI)
+	bucketName, prefix, err := h.parseBucketURI(gcsURI)
 	if err != nil {
 		return err
 	}
@@ -82,6 +82,31 @@ func (h *Handler) List(ctx context.Context, gcsURI string, callback func(string)
 		}
 	}
 	return nil
+}
+
+// Stat は GCS オブジェクトのメタデータを返します。
+// 見つからない場合のエラーは Open と同じく os.ErrNotExist を含みます。
+func (h *Handler) Stat(ctx context.Context, gcsURI string) (remoteio.ObjectInfo, error) {
+	bucketName, objectName, err := h.parseObjectURI(gcsURI)
+	if err != nil {
+		return remoteio.ObjectInfo{}, err
+	}
+
+	attrs, err := h.client.Bucket(bucketName).Object(objectName).Attrs(ctx)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return remoteio.ObjectInfo{}, fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", gcsURI, os.ErrNotExist)
+		}
+		return remoteio.ObjectInfo{}, fmt.Errorf("GCS属性取得失敗 (URI: %s): %w", gcsURI, err)
+	}
+
+	return remoteio.ObjectInfo{
+		Path:        gcsURI,
+		Size:        attrs.Size,
+		ModTime:     attrs.Updated,
+		ContentType: attrs.ContentType,
+		Metadata:    attrs.Metadata,
+	}, nil
 }
 
 // Exists は GCS オブジェクトの存在を確認します。不在は (false, nil) を返します。
@@ -123,6 +148,9 @@ func (h *Handler) Write(ctx context.Context, gcsURI string, contentReader io.Rea
 	if settings.CacheControl != "" {
 		wc.CacheControl = settings.CacheControl
 	}
+	if len(settings.Metadata) > 0 {
+		wc.Metadata = settings.Metadata
+	}
 
 	if _, err := io.Copy(wc, contentReader); err != nil {
 		_ = wc.Close()
@@ -150,20 +178,20 @@ func (h *Handler) Delete(ctx context.Context, gcsURI string) error {
 	return nil
 }
 
+// parseBucketURI は URI を検証してバケット名とプレフィックスに分解します（オブジェクト名は空でも可）。
+// 一覧のように prefix が空でも意味を持つ操作で使います。
+func (h *Handler) parseBucketURI(gcsURI string) (bucket, prefix string, err error) {
+	if h.client == nil {
+		return "", "", fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
+	}
+	return remoteio.ParseSchemeURI(Scheme, gcsURI)
+}
+
 // parseObjectURI は URI を検証してバケット名とオブジェクト名に分解します。
-//
-// オブジェクト名が空の URI (gs://bucket) を拒否するのは、バケット操作と取り違えたり、
-// 不在なのか URI が不正なのか区別できなくなるのを防ぐためです。
+// オブジェクト名が空の URI (gs://bucket) を拒否する理由は ParseSchemeObjectURI を参照してください。
 func (h *Handler) parseObjectURI(gcsURI string) (bucket, object string, err error) {
 	if h.client == nil {
 		return "", "", fmt.Errorf("GCSクライアントが未初期化です (URI: %s)", gcsURI)
 	}
-	bucket, object, err = remoteio.ParseRemoteURI(gcsURI)
-	if err != nil {
-		return "", "", err
-	}
-	if object == "" {
-		return "", "", fmt.Errorf("オブジェクト名が空です: %s", gcsURI)
-	}
-	return bucket, object, nil
+	return remoteio.ParseSchemeObjectURI(Scheme, gcsURI)
 }

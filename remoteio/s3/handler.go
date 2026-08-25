@@ -56,10 +56,7 @@ func (h *Handler) Open(ctx context.Context, s3URI string) (io.ReadCloser, error)
 
 // List は prefix 配下のオブジェクトを列挙します。
 func (h *Handler) List(ctx context.Context, s3URI string, callback func(string) error, settings remoteio.ListSettings) error {
-	if h.client == nil {
-		return fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
-	}
-	bucketName, prefix, err := remoteio.ParseRemoteURI(s3URI)
+	bucketName, prefix, err := h.parseBucketURI(s3URI)
 	if err != nil {
 		return err
 	}
@@ -100,6 +97,34 @@ func (h *Handler) List(ctx context.Context, s3URI string, callback func(string) 
 	return nil
 }
 
+// Stat は S3 オブジェクトのメタデータを返します。
+// 見つからない場合のエラーは Open と同じく os.ErrNotExist を含みます。
+func (h *Handler) Stat(ctx context.Context, s3URI string) (remoteio.ObjectInfo, error) {
+	bucketName, objectPath, err := h.parseObjectURI(s3URI)
+	if err != nil {
+		return remoteio.ObjectInfo{}, err
+	}
+
+	output, err := h.client.HeadObject(ctx, &awss3.HeadObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectPath),
+	})
+	if err != nil {
+		if isNotFound(err) {
+			return remoteio.ObjectInfo{}, fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", s3URI, os.ErrNotExist)
+		}
+		return remoteio.ObjectInfo{}, fmt.Errorf("S3属性取得失敗 (URI: %s): %w", s3URI, err)
+	}
+
+	return remoteio.ObjectInfo{
+		Path:        s3URI,
+		Size:        aws.ToInt64(output.ContentLength),
+		ModTime:     aws.ToTime(output.LastModified),
+		ContentType: aws.ToString(output.ContentType),
+		Metadata:    output.Metadata,
+	}, nil
+}
+
 // Exists は S3 オブジェクトの存在を確認します。不在は (false, nil) を返します。
 func (h *Handler) Exists(ctx context.Context, s3URI string) (bool, error) {
 	bucketName, objectPath, err := h.parseObjectURI(s3URI)
@@ -115,15 +140,21 @@ func (h *Handler) Exists(ctx context.Context, s3URI string) (bool, error) {
 		return true, nil
 	}
 
-	// HeadObject は NoSuchKey ではなく NotFound を返すことがあるため両方見ます。
-	if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
-		return false, nil
-	}
-	if _, ok := errors.AsType[*types.NotFound](err); ok {
+	if isNotFound(err) {
 		return false, nil
 	}
 
 	return false, fmt.Errorf("S3属性取得失敗: %w", err)
+}
+
+// isNotFound は、オブジェクトが存在しないことを表すエラーかどうかを判定します。
+// HeadObject は NoSuchKey ではなく NotFound を返すことがあるため両方見ます。
+func isNotFound(err error) bool {
+	if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
+		return true
+	}
+	_, ok := errors.AsType[*types.NotFound](err)
+	return ok
 }
 
 // Write は S3 オブジェクトへ書き込みます。
@@ -152,6 +183,9 @@ func (h *Handler) Write(ctx context.Context, s3URI string, contentReader io.Read
 	if settings.CacheControl != "" {
 		input.CacheControl = aws.String(settings.CacheControl)
 	}
+	if len(settings.Metadata) > 0 {
+		input.Metadata = settings.Metadata
+	}
 
 	if _, err := h.client.PutObject(ctx, input); err != nil {
 		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました (URI: %s): %w", s3URI, err)
@@ -176,20 +210,20 @@ func (h *Handler) Delete(ctx context.Context, s3URI string) error {
 	return nil
 }
 
+// parseBucketURI は URI を検証してバケット名とプレフィックスに分解します（オブジェクト名は空でも可）。
+// 一覧のように prefix が空でも意味を持つ操作で使います。
+func (h *Handler) parseBucketURI(s3URI string) (bucket, prefix string, err error) {
+	if h.client == nil {
+		return "", "", fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
+	}
+	return remoteio.ParseSchemeURI(Scheme, s3URI)
+}
+
 // parseObjectURI は URI を検証してバケット名とオブジェクト名に分解します。
-//
-// オブジェクト名が空の URI (s3://bucket) を拒否するのは、バケット操作と取り違えたり、
-// 不在なのか URI が不正なのか区別できなくなるのを防ぐためです。
+// オブジェクト名が空の URI (s3://bucket) を拒否する理由は ParseSchemeObjectURI を参照してください。
 func (h *Handler) parseObjectURI(s3URI string) (bucket, object string, err error) {
 	if h.client == nil {
 		return "", "", fmt.Errorf("S3クライアントが未初期化です (URI: %s)", s3URI)
 	}
-	bucket, object, err = remoteio.ParseRemoteURI(s3URI)
-	if err != nil {
-		return "", "", err
-	}
-	if object == "" {
-		return "", "", fmt.Errorf("オブジェクト名が空です: %s", s3URI)
-	}
-	return bucket, object, nil
+	return remoteio.ParseSchemeObjectURI(Scheme, s3URI)
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +23,7 @@ func TestClientFactory_DefaultRegion(t *testing.T) {
 
 	f, err := New(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "ap-northeast-1", f.awsConfig.Region, "リージョン未設定時はデフォルトリージョンが適用されるべきです")
+	assert.Equal(t, DefaultRegion, f.awsConfig.Region, "リージョン未設定時はデフォルトリージョンが適用されるべきです")
 }
 
 func TestClientFactory_Accessors(t *testing.T) {
@@ -80,4 +82,36 @@ func TestClientFactory_Close(t *testing.T) {
 		_, err = f.URLSigner()
 		assert.Error(t, err)
 	})
+}
+
+// リージョンの決定順は 明示指定 > 環境や設定ファイル > DefaultRegion であること。
+func TestClientFactory_RegionResolution(t *testing.T) {
+	t.Run("WithRegion は環境変数より優先される", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "us-east-1")
+
+		f, err := New(context.Background(), WithRegion("eu-west-1"))
+		require.NoError(t, err)
+		assert.Equal(t, "eu-west-1", f.awsConfig.Region)
+	})
+
+	t.Run("WithConfig は LoadDefaultConfig を呼ばない", func(t *testing.T) {
+		f, err := New(context.Background(), WithConfig(aws.Config{Region: "us-west-2"}))
+		require.NoError(t, err)
+		assert.Equal(t, "us-west-2", f.awsConfig.Region)
+	})
+
+	t.Run("WithConfig でリージョンが空なら DefaultRegion", func(t *testing.T) {
+		f, err := New(context.Background(), WithConfig(aws.Config{}))
+		require.NoError(t, err)
+		assert.Equal(t, DefaultRegion, f.awsConfig.Region)
+	})
+}
+
+// WithClient は生成済みクライアントをそのまま使い、設定解決を行わないこと。
+func TestClientFactory_WithClient(t *testing.T) {
+	client := s3.NewFromConfig(aws.Config{Region: "ap-northeast-1"})
+
+	f, err := New(context.Background(), WithClient(client))
+	require.NoError(t, err)
+	assert.Same(t, client, f.client)
 }

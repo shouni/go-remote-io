@@ -2,127 +2,195 @@ package remoteio
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"io/fs"
+	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 )
 
-// localHandler はローカルファイルシステムを扱う SchemeHandler です。
+// localHandler はローカルファイルシステムを扱う Handler です。
 // Scheme() が空文字なので、どのスキームにも一致しなかったパスを受け取ります。
 type localHandler struct{}
 
-var _ SchemeHandler = localHandler{}
+var _ Handler = localHandler{}
 
 // NewLocalHandler はローカルファイルシステム用のハンドラを返します。
 // Router へ渡すとフォールバック（スキームを持たないパスの担当）になります。
-func NewLocalHandler() SchemeHandler { return localHandler{} }
+func NewLocalHandler() Handler { return localHandler{} }
 
 // Scheme は空文字を返し、フォールバックであることを示します。
 func (localHandler) Scheme() string { return "" }
 
 // Open はローカルファイルを開きます。
-// 見つからない場合のエラーは os.ErrNotExist を含むため、呼び出し側は
+// 見つからない場合のエラーは ErrNotExist を含むため、呼び出し側は
 // リモートと同じく errors.Is で判定できます。
+//
+// ディレクトリは Stat と同じく ErrNotExist を返します。os.Open はディレクトリでも
+// 成功し、読もうとした時点で初めて失敗するため、そのままだとローカルだけ
+// 「開けるが読めないもの」が存在することになります。リモートには対応する実体が
+// 無いので、開く時点で揃えます。
 func (localHandler) Open(_ context.Context, path string) (io.ReadCloser, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("ローカルファイルのオープンに失敗しました: %w", err)
+		return nil, wrapf(err, "ローカルファイルのオープンに失敗しました (%s)", path)
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapf(err, "ローカルファイルのステータス取得に失敗しました (%s)", path)
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, wrapf(fs.ErrNotExist, "ディレクトリはオブジェクトではありません (%s)", path)
 	}
 	return file, nil
 }
 
-// List は path 配下のファイルを列挙します。
-//
-// 区切り文字が指定されていない場合は再帰的に列挙します。GCS / S3 の一覧は
-// prefix 配下を再帰的に返すため、ローカルだけ直下で止まると同じ呼び出しが
-// スキームによって別の意味になり、呼び出し側からはその違いが見えません。
-// 区切り文字を指定したときは prefix 直下のみを対象とし、ディレクトリを
-// 区切り文字で終わるパスとして併せて列挙します（疑似ディレクトリ相当）。
-func (localHandler) List(_ context.Context, path string, callback func(string) error, settings ListSettings) error {
-	if settings.Delimiter != "" {
-		return listLocalShallow(path, callback, settings)
-	}
-	return listLocalRecursive(path, callback)
-}
-
-// listLocalShallow は path 直下のみを列挙します。
-func listLocalShallow(path string, callback func(string) error, settings ListSettings) error {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return fmt.Errorf("ローカルディレクトリの読み込みに失敗しました (path: %s): %w", path, err)
-	}
-	for _, entry := range entries {
-		name := filepath.Join(path, entry.Name())
-		if entry.IsDir() {
-			name += settings.Delimiter
-		}
-		if err := callback(name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// listLocalRecursive は path 配下のファイルを再帰的に列挙します（ディレクトリ自体は返しません）。
-func listLocalRecursive(path string, callback func(string) error) error {
-	err := filepath.WalkDir(path, func(entryPath string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		return callback(entryPath)
-	})
-	if err != nil {
-		// callback が返したエラーはそのまま伝えます（walk の失敗と区別できるようにするため）。
-		if _, ok := err.(*fs.PathError); ok {
-			return fmt.Errorf("ローカルディレクトリの読み込みに失敗しました (path: %s): %w", path, err)
-		}
-		return err
-	}
-	return nil
-}
-
 // Stat はローカルファイルのメタデータを返します。
 // ローカルファイルシステムは Content-Type を保持しないため、ContentType は空です。
+//
+// ディレクトリは ErrNotExist を返します。理由は Store.Exists の doc を参照してください。
 func (localHandler) Stat(_ context.Context, path string) (ObjectInfo, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		// os.Stat のエラーは os.ErrNotExist を含むため、Open と同じく errors.Is で判定できます。
-		return ObjectInfo{}, fmt.Errorf("ローカルファイルのステータス取得に失敗しました: %w", err)
+		return ObjectInfo{}, wrapf(err, "ローカルファイルのステータス取得に失敗しました (%s)", path)
 	}
-	return ObjectInfo{Path: path, Size: info.Size(), ModTime: info.ModTime()}, nil
+	if info.IsDir() {
+		return ObjectInfo{}, wrapf(fs.ErrNotExist, "ディレクトリはオブジェクトではありません (%s)", path)
+	}
+	return ObjectInfo{URI: path, Size: info.Size(), ModTime: info.ModTime()}, nil
 }
 
-// Exists はローカルファイルの存在を確認します。
-func (localHandler) Exists(_ context.Context, path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
+// List は path 配下を列挙します。
+//
+// 区切り文字が指定されていない場合は再帰的にファイルだけを列挙します。
+// GCS / S3 の一覧はプレフィックス配下を再帰的に返すため、ローカルだけ直下で止まると
+// 同じ呼び出しがスキームによって別の意味になり、呼び出し側からはその違いが見えません。
+// 区切り文字を指定したときは直下のみを対象とし、ディレクトリを IsPrefix の Entry として
+// 併せて返します（疑似ディレクトリ相当）。
+func (localHandler) List(ctx context.Context, path string, opts ListOptions) iter.Seq2[Entry, error] {
+	if opts.Delimiter != "" {
+		return listLocalShallow(ctx, path, opts.Delimiter)
 	}
-	if os.IsNotExist(err) {
-		return false, nil
+	return listLocalRecursive(ctx, path)
+}
+
+// listLocalShallow は path 直下のみを列挙します。
+func listLocalShallow(ctx context.Context, path, delimiter string) iter.Seq2[Entry, error] {
+	return func(yield func(Entry, error) bool) {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			// 不在のディレクトリは「何も無いプレフィックス」として空を返します。
+			// リモートに「存在しないプレフィックス」という状態は無いため、
+			// ここでエラーにすると同じ呼び出しがスキームによって別の意味になります。
+			// 権限エラーなど、不在以外の失敗はそのまま伝えます。
+			if errors.Is(err, fs.ErrNotExist) {
+				return
+			}
+			yield(Entry{}, wrapf(err, "ローカルディレクトリの読み込みに失敗しました (%s)", path))
+			return
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				yield(Entry{}, err)
+				return
+			}
+
+			name := entry.Name()
+			full := filepath.Join(path, name)
+			if entry.IsDir() {
+				if !yield(Entry{URI: full + delimiter, Name: name + delimiter, IsPrefix: true}, nil) {
+					return
+				}
+				continue
+			}
+
+			// 一覧のためだけに Stat を増やさないよう、取れなければサイズと時刻は
+			// ゼロ値のまま返します。名前が拾えないより有用です。
+			var size int64
+			var modTime time.Time
+			if info, err := entry.Info(); err == nil {
+				size, modTime = info.Size(), info.ModTime()
+			}
+			if !yield(Entry{URI: full, Name: name, Size: size, ModTime: modTime}, nil) {
+				return
+			}
+		}
 	}
-	return false, fmt.Errorf("ローカルファイルのステータス取得に失敗しました: %w", err)
+}
+
+// listLocalRecursive は path 配下のファイルを再帰的に列挙します（ディレクトリ自体は返しません）。
+func listLocalRecursive(ctx context.Context, root string) iter.Seq2[Entry, error] {
+	return func(yield func(Entry, error) bool) {
+		// 打ち切りを walk へ伝えるための番兵です。callback が返したエラーと
+		// walk 自身の失敗を取り違えないよう、専用の値を使います。
+		stop := errors.New("remoteio: stop walk")
+
+		err := filepath.WalkDir(root, func(entryPath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			name, relErr := filepath.Rel(root, entryPath)
+			if relErr != nil {
+				// root 配下を歩いている以上ここへは来ませんが、来たときは
+				// 相対名を諦めてフルパスを入れます。
+				name = entryPath
+			}
+
+			var size int64
+			var modTime time.Time
+			if info, infoErr := d.Info(); infoErr == nil {
+				size, modTime = info.Size(), info.ModTime()
+			}
+			if !yield(Entry{URI: entryPath, Name: filepath.ToSlash(name), Size: size, ModTime: modTime}, nil) {
+				return stop
+			}
+			return nil
+		})
+
+		switch {
+		case err == nil, errors.Is(err, stop):
+			return
+		case errors.Is(err, fs.ErrNotExist):
+			// listLocalShallow と同じ理由で、不在は空の一覧として扱います。
+			return
+		case errors.Is(err, fs.ErrPermission):
+			yield(Entry{}, wrapf(err, "ローカルディレクトリの読み込みに失敗しました (%s)", root))
+		default:
+			yield(Entry{}, err)
+		}
+	}
 }
 
 // Write はローカルファイルシステムに書き込みます。
-// 注意: ローカルファイルシステムでは ContentType や ContentDisposition などの
-// メタデータは保存されず、無視されます。
-func (localHandler) Write(ctx context.Context, path string, contentReader io.Reader, settings WriteSettings) error {
+//
+// 同じディレクトリの一時ファイルへ書いてから差し替えるため、途中で失敗しても
+// 書き込み先は変化しません。os.Create へ直接書くと、ctx のキャンセルや I/O エラーで
+// 抜けたときに中途半端なファイルが残ります。
+//
+// 注意: ContentType や ContentDisposition などのメタデータは保存されず、無視されます。
+func (localHandler) Write(ctx context.Context, path string, src io.Reader, opts WriteOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	slog.DebugContext(ctx, "ローカル書き込み処理開始",
 		slog.String("path", path),
-		slog.String("content_type", settings.ContentType),
-		slog.String("disposition", settings.ContentDisposition),
-		slog.String("cache_control", settings.CacheControl),
+		slog.String("content_type", opts.ContentType),
+		slog.String("disposition", opts.ContentDisposition),
+		slog.String("cache_control", opts.CacheControl),
 	)
 
 	outputDir := filepath.Dir(path)
@@ -131,38 +199,62 @@ func (localHandler) Write(ctx context.Context, path string, contentReader io.Rea
 	}
 	if outputDir != "." {
 		if err := os.MkdirAll(outputDir, 0o755); err != nil {
-			return fmt.Errorf("出力ディレクトリ(%s)の作成に失敗しました: %w", outputDir, err)
+			return wrapf(err, "出力ディレクトリ(%s)の作成に失敗しました", outputDir)
 		}
 	}
 
-	// 一時ファイルへ書いてから rename します。os.Create に直接書くと、ctx のキャンセルや
-	// I/O エラーで抜けたときに中途半端なファイルが残ります。リモート側は失敗すれば
-	// オブジェクトができないので、ここだけ挙動が違うと呼び出し側が両方に備えることになります。
 	tmp, err := os.CreateTemp(outputDir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("ローカルファイル(%s)の作成に失敗しました: %w", path, err)
+		return wrapf(err, "ローカルファイル(%s)の作成に失敗しました", path)
 	}
 	tmpName := tmp.Name()
-	// 失敗経路では必ず消します。成功時は rename 済みで Remove は不在エラーになるだけです。
+	// 失敗経路では必ず消します。成功時は差し替え済みで Remove は不在エラーになるだけです。
 	defer func() { _ = os.Remove(tmpName) }()
 
 	// os.File への io.Copy は ctx を見ないため、ctxReader を挟んでキャンセルを検知します。
-	if _, err := io.Copy(tmp, &ctxReader{ctx: ctx, r: contentReader}); err != nil {
+	if _, err := io.Copy(tmp, &ctxReader{ctx: ctx, r: src}); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("ローカルファイル(%s)へのコンテンツ書き込み中にエラーが発生しました: %w", path, err)
+		return wrapf(err, "ローカルファイル(%s)へのコンテンツ書き込み中にエラーが発生しました", path)
+	}
+
+	// rename の前に内容を確定させます。fsync が無いと、クラッシュ時に
+	// 名前だけ差し替わって中身が空のファイルが残り得ます。
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return wrapf(err, "ローカルファイル(%s)の同期に失敗しました", path)
+	}
+
+	// CreateTemp は 0600 で作るため、通常の作成に近い権限へ戻します。
+	// 既存ファイルを差し替える場合は、その権限を引き継ぎます。
+	mode := fs.FileMode(0o644)
+	if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+		mode = info.Mode().Perm()
+	}
+	// パスではなく開いているディスクリプタへ適用します（差し替え対象を取り違えないため）。
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return wrapf(err, "ローカルファイル(%s)のパーミッション設定に失敗しました", path)
 	}
 
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("ローカルファイル(%s)のクローズに失敗しました: %w", path, err)
+		return wrapf(err, "ローカルファイル(%s)のクローズに失敗しました", path)
 	}
 
-	// CreateTemp は 0600 で作るため、os.Create 相当のパーミッションへ戻します。
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("ローカルファイル(%s)のパーミッション設定に失敗しました: %w", path, err)
+	if opts.IfNotExists {
+		// link は対象が既に在ると EEXIST で失敗します。Exists で確かめてから
+		// rename する形と違い、確認と作成の間に他のプロセスが割り込めません。
+		if err := os.Link(tmpName, path); err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				return wrapf(fs.ErrExist, "ローカルファイル(%s)は既に存在します", path)
+			}
+			return wrapf(err, "ローカルファイル(%s)の作成に失敗しました", path)
+		}
+		slog.DebugContext(ctx, "ローカル書き込み処理完了", slog.String("path", path))
+		return nil
 	}
 
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("ローカルファイル(%s)の差し替えに失敗しました: %w", path, err)
+		return wrapf(err, "ローカルファイル(%s)の差し替えに失敗しました", path)
 	}
 
 	slog.DebugContext(ctx, "ローカル書き込み処理完了", slog.String("path", path))
@@ -171,9 +263,8 @@ func (localHandler) Write(ctx context.Context, path string, contentReader io.Rea
 
 // Delete はローカルファイルを削除します。不在はエラーにしません。
 func (localHandler) Delete(_ context.Context, path string) error {
-	err := os.Remove(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("ローカルファイルの削除に失敗しました: %w", err)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return wrapf(err, "ローカルファイルの削除に失敗しました (%s)", path)
 	}
 	return nil
 }

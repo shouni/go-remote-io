@@ -1,92 +1,94 @@
-package gcs
+package gcs_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
+	"github.com/fsouza/fake-gcs-server/fakestorage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/oauth2/google"
+
+	"github.com/shouni/go-remote-io/remoteio"
+	"github.com/shouni/go-remote-io/remoteio/gcs"
 )
 
-// skipWithoutGCPCredentials は、GCP Application Default Credentials が
-// 利用できない環境（CIランナーなど）でこのテストをスキップします。
-// storage.NewClient は ADC を必須とするため、認証情報がない環境では
-// ここでスキップしないと必ず失敗します。
-func skipWithoutGCPCredentials(t *testing.T) {
+// newTestFactory は、フェイクのクライアントを注入したファクトリを返します。
+// WithClient を通るため、認証情報の無い環境でも走ります。
+func newTestFactory(t *testing.T) *gcs.ClientFactory {
 	t.Helper()
-	if _, err := google.FindDefaultCredentials(context.Background()); err != nil {
-		t.Skipf("GCP Application Default Credentials が見つからないため、このテストをスキップします: %v", err)
+
+	server, err := fakestorage.NewServerWithOptions(fakestorage.Options{BucketsLocation: "US"})
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+	server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: testBucket})
+
+	factory, err := gcs.New(context.Background(), gcs.WithClient(server.Client()))
+	require.NoError(t, err)
+	return factory
+}
+
+func TestFactoryAccessors(t *testing.T) {
+	ctx := context.Background()
+	factory := newTestFactory(t)
+
+	t.Run("Store は gs:// とローカルを扱う", func(t *testing.T) {
+		store, err := factory.Store()
+		require.NoError(t, err)
+
+		require.NoError(t, remoteio.WriteAll(ctx, store, uri("a.txt"), []byte("x")))
+
+		dir := t.TempDir()
+		require.NoError(t, remoteio.WriteAll(ctx, store, dir+"/local.txt", []byte("y")))
+
+		_, err = store.Open(ctx, "s3://other/key")
+		assert.ErrorIs(t, err, remoteio.ErrUnsupportedScheme)
+	})
+
+	t.Run("Handler は担当スキームを返す", func(t *testing.T) {
+		handler, err := factory.Handler()
+		require.NoError(t, err)
+		assert.Equal(t, gcs.Scheme, handler.Scheme())
+		assert.Equal(t, "gs", handler.Scheme(), "区切りを含まない RFC 3986 の形であること")
+	})
+}
+
+func TestFactoryClose(t *testing.T) {
+	factory := newTestFactory(t)
+
+	t.Run("WithClient のクライアントは閉じない", func(t *testing.T) {
+		require.NoError(t, factory.Close())
+
+		// 注入されたクライアントのライフサイクルは呼び出し元に残るため、
+		// ファクトリを閉じてもクライアント自体は生きています。
+		// ここで確かめるのは、ファクトリが参照を手放したことです。
+		_, err := factory.Store()
+		assert.ErrorIs(t, err, remoteio.ErrClosed)
+
+		_, err = factory.Handler()
+		assert.ErrorIs(t, err, remoteio.ErrClosed)
+	})
+
+	t.Run("Close は冪等", func(t *testing.T) {
+		assert.NoError(t, factory.Close())
+	})
+}
+
+// Close と各アクセサが並行に呼ばれても安全であることの確認です。
+// クライアントのフィールドを無同期で nil にすると Close と読み出しが競合しますが、
+// 並行に触るテストが無いと -race を付けていても検出されません。
+func TestFactoryCloseIsRaceFree(t *testing.T) {
+	factory := newTestFactory(t)
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			// クローズ前後どちらでも良く、エラーになること自体は想定内です。
+			// ここで見ているのはデータ競合が起きないことです。
+			_, _ = factory.Store()
+			_, _ = factory.Handler()
+		})
 	}
-}
-
-func TestClientFactory_New(t *testing.T) {
-	skipWithoutGCPCredentials(t)
-
-	f, err := New(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, f)
-	require.NotNil(t, f.client)
-}
-
-func TestClientFactory_Accessors(t *testing.T) {
-	skipWithoutGCPCredentials(t)
-
-	f, err := New(context.Background())
-	require.NoError(t, err)
-
-	t.Run("Reader delegates to InputReader", func(t *testing.T) {
-		r, err := f.Reader()
-		require.NoError(t, err)
-		assert.NotNil(t, r)
-	})
-
-	t.Run("InputReader succeeds while client is alive", func(t *testing.T) {
-		r, err := f.InputReader()
-		require.NoError(t, err)
-		assert.NotNil(t, r)
-	})
-
-	t.Run("Writer delegates to OutputWriter", func(t *testing.T) {
-		w, err := f.Writer()
-		require.NoError(t, err)
-		assert.NotNil(t, w)
-	})
-
-	t.Run("OutputWriter succeeds while client is alive", func(t *testing.T) {
-		w, err := f.OutputWriter()
-		require.NoError(t, err)
-		assert.NotNil(t, w)
-	})
-
-	t.Run("URLSigner succeeds while client is alive", func(t *testing.T) {
-		s, err := f.URLSigner()
-		require.NoError(t, err)
-		assert.NotNil(t, s)
-	})
-}
-
-func TestClientFactory_Close(t *testing.T) {
-	skipWithoutGCPCredentials(t)
-
-	f, err := New(context.Background())
-	require.NoError(t, err)
-
-	require.NoError(t, f.Close())
-	assert.Nil(t, f.client)
-
-	t.Run("Close is idempotent", func(t *testing.T) {
-		assert.NoError(t, f.Close())
-	})
-
-	t.Run("accessors fail after Close", func(t *testing.T) {
-		_, err := f.InputReader()
-		assert.Error(t, err)
-
-		_, err = f.OutputWriter()
-		assert.Error(t, err)
-
-		_, err = f.URLSigner()
-		assert.Error(t, err)
-	})
+	wg.Go(func() { _ = factory.Close() })
+	wg.Wait()
 }

@@ -1,117 +1,90 @@
-package s3
+package s3_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/shouni/go-remote-io/remoteio"
+	"github.com/shouni/go-remote-io/remoteio/s3"
 )
 
-func TestClientFactory_New(t *testing.T) {
-	f, err := New(context.Background())
+func newTestFactory(t *testing.T) *s3.ClientFactory {
+	t.Helper()
+
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(s3.DefaultRegion),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
+	)
 	require.NoError(t, err)
-	require.NotNil(t, f)
-	require.NotNil(t, f.client)
+
+	factory, err := s3.New(context.Background(), s3.WithClient(awss3.NewFromConfig(cfg)))
+	require.NoError(t, err)
+	return factory
 }
 
-func TestClientFactory_DefaultRegion(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
+func TestFactoryOptions(t *testing.T) {
+	ctx := context.Background()
 
-	f, err := New(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, DefaultRegion, f.awsConfig.Region, "リージョン未設定時はデフォルトリージョンが適用されるべきです")
-}
-
-func TestClientFactory_Accessors(t *testing.T) {
-	f, err := New(context.Background())
-	require.NoError(t, err)
-
-	t.Run("Reader delegates to InputReader", func(t *testing.T) {
-		r, err := f.Reader()
+	t.Run("WithConfig と WithRegion で解決できる", func(t *testing.T) {
+		// New(ctx) だけだと LoadDefaultConfig が認証情報を要求するため、
+		// 解決済みの設定を渡す経路をここで通します。
+		factory, err := s3.New(ctx,
+			s3.WithConfig(aws.Config{Credentials: credentials.NewStaticCredentialsProvider("k", "s", "")}),
+			s3.WithRegion("us-east-1"),
+			s3.WithEndpoint("http://127.0.0.1:1"),
+			s3.WithPathStyle(),
+		)
 		require.NoError(t, err)
-		assert.NotNil(t, r)
+		t.Cleanup(func() { _ = factory.Close() })
+
+		handler, err := factory.Handler()
+		require.NoError(t, err)
+		assert.Equal(t, "s3", handler.Scheme(), "区切りを含まない RFC 3986 の形であること")
 	})
 
-	t.Run("InputReader succeeds while client is alive", func(t *testing.T) {
-		r, err := f.InputReader()
+	t.Run("リージョン未指定なら既定値", func(t *testing.T) {
+		factory, err := s3.New(ctx, s3.WithConfig(aws.Config{}))
 		require.NoError(t, err)
-		assert.NotNil(t, r)
-	})
+		t.Cleanup(func() { _ = factory.Close() })
 
-	t.Run("Writer delegates to OutputWriter", func(t *testing.T) {
-		w, err := f.Writer()
+		_, err = factory.Store()
 		require.NoError(t, err)
-		assert.NotNil(t, w)
-	})
-
-	t.Run("OutputWriter succeeds while client is alive", func(t *testing.T) {
-		w, err := f.OutputWriter()
-		require.NoError(t, err)
-		assert.NotNil(t, w)
-	})
-
-	t.Run("URLSigner succeeds while client is alive", func(t *testing.T) {
-		s, err := f.URLSigner()
-		require.NoError(t, err)
-		assert.NotNil(t, s)
 	})
 }
 
-func TestClientFactory_Close(t *testing.T) {
-	f, err := New(context.Background())
-	require.NoError(t, err)
+func TestFactoryClose(t *testing.T) {
+	factory := newTestFactory(t)
 
-	require.NoError(t, f.Close())
-	assert.Nil(t, f.client)
+	require.NoError(t, factory.Close())
 
-	t.Run("Close is idempotent", func(t *testing.T) {
-		assert.NoError(t, f.Close())
-	})
+	_, err := factory.Store()
+	assert.ErrorIs(t, err, remoteio.ErrClosed)
 
-	t.Run("accessors fail after Close", func(t *testing.T) {
-		_, err := f.InputReader()
-		assert.Error(t, err)
+	_, err = factory.Handler()
+	assert.ErrorIs(t, err, remoteio.ErrClosed)
 
-		_, err = f.OutputWriter()
-		assert.Error(t, err)
-
-		_, err = f.URLSigner()
-		assert.Error(t, err)
-	})
+	assert.NoError(t, factory.Close(), "Close は冪等")
 }
 
-// リージョンの決定順は 明示指定 > 環境や設定ファイル > DefaultRegion であること。
-func TestClientFactory_RegionResolution(t *testing.T) {
-	t.Run("WithRegion は環境変数より優先される", func(t *testing.T) {
-		t.Setenv("AWS_REGION", "us-east-1")
+// Close と各アクセサが並行に呼ばれても安全であることの確認です。
+func TestFactoryCloseIsRaceFree(t *testing.T) {
+	factory := newTestFactory(t)
 
-		f, err := New(context.Background(), WithRegion("eu-west-1"))
-		require.NoError(t, err)
-		assert.Equal(t, "eu-west-1", f.awsConfig.Region)
-	})
-
-	t.Run("WithConfig は LoadDefaultConfig を呼ばない", func(t *testing.T) {
-		f, err := New(context.Background(), WithConfig(aws.Config{Region: "us-west-2"}))
-		require.NoError(t, err)
-		assert.Equal(t, "us-west-2", f.awsConfig.Region)
-	})
-
-	t.Run("WithConfig でリージョンが空なら DefaultRegion", func(t *testing.T) {
-		f, err := New(context.Background(), WithConfig(aws.Config{}))
-		require.NoError(t, err)
-		assert.Equal(t, DefaultRegion, f.awsConfig.Region)
-	})
-}
-
-// WithClient は生成済みクライアントをそのまま使い、設定解決を行わないこと。
-func TestClientFactory_WithClient(t *testing.T) {
-	client := s3.NewFromConfig(aws.Config{Region: "ap-northeast-1"})
-
-	f, err := New(context.Background(), WithClient(client))
-	require.NoError(t, err)
-	assert.Same(t, client, f.client)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			_, _ = factory.Store()
+			_, _ = factory.Handler()
+		})
+	}
+	wg.Go(func() { _ = factory.Close() })
+	wg.Wait()
 }

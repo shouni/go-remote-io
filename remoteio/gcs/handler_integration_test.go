@@ -2,8 +2,9 @@ package gcs_test
 
 import (
 	"context"
+	"errors"
 	"io"
-	"os"
+	"iter"
 	"strings"
 	"testing"
 
@@ -17,13 +18,12 @@ import (
 
 const testBucket = "test-bucket"
 
-// newTestRouter は、インプロセスの GCS フェイクに接続した Router を返します。
+// newTestStore は、インプロセスの GCS フェイクに接続した Store を返します。
 //
 // エミュレータをプロセス内で動かすため、docker も認証情報も要りません。これが無いと
 // 読み書き・一覧・存在確認の実装（このパッケージの大半）が 1 行も実行されないまま
-// になります。以前はここが未検証で、疑似ディレクトリの扱いのように壊れても静かな
-// ロジックがテストの外にありました。
-func newTestRouter(t *testing.T, objects ...fakestorage.Object) *remoteio.Router {
+// になります。疑似ディレクトリの扱いのように、壊れても静かなロジックがここにあります。
+func newTestStore(t *testing.T, objects ...fakestorage.Object) remoteio.Store {
 	t.Helper()
 
 	server, err := fakestorage.NewServerWithOptions(fakestorage.Options{
@@ -35,235 +35,274 @@ func newTestRouter(t *testing.T, objects ...fakestorage.Object) *remoteio.Router
 
 	server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: testBucket})
 
-	return remoteio.NewRouter(gcs.NewHandler(server.Client()), remoteio.NewLocalHandler())
+	return remoteio.NewStore(gcs.NewHandler(server.Client()))
 }
 
 func object(name, content string) fakestorage.Object {
 	return fakestorage.Object{
-		BucketName: testBucket, Name: name,
-		Content: []byte(content),
+		ObjectAttrs: fakestorage.ObjectAttrs{BucketName: testBucket, Name: name},
+		Content:     []byte(content),
 	}
 }
 
-func uri(name string) string { return remoteio.BuildGCSURI(testBucket, name) }
+func uri(name string) string { return remoteio.BuildURI(gcs.Scheme, testBucket, name) }
 
-func TestHandlerOpen(t *testing.T) {
+func collect(t *testing.T, seq iter.Seq2[remoteio.Entry, error]) []remoteio.Entry {
+	t.Helper()
+	var out []remoteio.Entry
+	for entry, err := range seq {
+		require.NoError(t, err)
+		out = append(out, entry)
+	}
+	return out
+}
+
+func names(entries []remoteio.Entry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Name)
+	}
+	return out
+}
+
+func TestOpenAndStat(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t, object("data/report.txt", "hello gcs"))
+	store := newTestStore(t, object("data/report.txt", "hello gcs"))
 
 	t.Run("既存オブジェクトを読める", func(t *testing.T) {
-		rc, err := router.Open(ctx, uri("data/report.txt"))
+		data, err := remoteio.ReadAll(ctx, store, uri("data/report.txt"))
 		require.NoError(t, err)
-		defer func() { _ = rc.Close() }()
-
-		got, err := io.ReadAll(rc)
-		require.NoError(t, err)
-		assert.Equal(t, "hello gcs", string(got))
+		assert.Equal(t, "hello gcs", string(data))
 	})
 
-	// スキームに依らず errors.Is(err, os.ErrNotExist) で判定できることが、
+	// スキームに依らず errors.Is(err, remoteio.ErrNotExist) で判定できることが、
 	// このライブラリの抽象が成立するための条件です。
-	t.Run("不在は os.ErrNotExist を包んで返す", func(t *testing.T) {
-		_, err := router.Open(ctx, uri("data/missing.txt"))
-		require.Error(t, err)
-		assert.ErrorIs(t, err, os.ErrNotExist)
+	t.Run("不在は ErrNotExist を包んで返す", func(t *testing.T) {
+		_, err := store.Open(ctx, uri("data/missing.txt"))
+		assert.ErrorIs(t, err, remoteio.ErrNotExist)
+
+		_, err = store.Stat(ctx, uri("data/missing.txt"))
+		assert.ErrorIs(t, err, remoteio.ErrNotExist)
 	})
 
-	t.Run("オブジェクト名が空の URI は拒否する", func(t *testing.T) {
-		_, err := router.Open(ctx, "gs://"+testBucket)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "オブジェクト名が空です")
+	t.Run("Stat がサイズと URI を返す", func(t *testing.T) {
+		info, err := store.Stat(ctx, uri("data/report.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, uri("data/report.txt"), info.URI)
+		assert.Equal(t, int64(len("hello gcs")), info.Size)
+	})
+
+	t.Run("Exists は不在を (false, nil) で返す", func(t *testing.T) {
+		ok, err := store.Exists(ctx, uri("data/missing.txt"))
+		require.NoError(t, err)
+		assert.False(t, ok)
+
+		ok, err = store.Exists(ctx, uri("data/report.txt"))
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("オブジェクト名が空の URI を拒否する", func(t *testing.T) {
+		_, err := store.Open(ctx, "gs://"+testBucket)
+		assert.ErrorIs(t, err, remoteio.ErrInvalidURI)
 	})
 }
 
-func TestHandlerExists(t *testing.T) {
+func TestList(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t, object("data/report.txt", "x"))
-
-	exists, err := router.Exists(ctx, uri("data/report.txt"))
-	require.NoError(t, err)
-	assert.True(t, exists)
-
-	// 不在は (false, nil)。エラーにすると呼び出し側が毎回握りつぶすことになります。
-	exists, err = router.Exists(ctx, uri("data/missing.txt"))
-	require.NoError(t, err)
-	assert.False(t, exists)
-}
-
-func TestHandlerWriteAndDelete(t *testing.T) {
-	ctx := context.Background()
-	router := newTestRouter(t)
-	target := uri("data/new.txt")
-
-	require.NoError(t, router.Write(ctx, target, strings.NewReader("written"),
-		remoteio.WithContentType("text/plain"),
-		remoteio.WithCacheControl("public, max-age=60"),
-		remoteio.WithAttachment("new.txt"),
-	))
-
-	rc, err := router.Open(ctx, target)
-	require.NoError(t, err)
-	got, err := io.ReadAll(rc)
-	require.NoError(t, err)
-	require.NoError(t, rc.Close())
-	assert.Equal(t, "written", string(got))
-
-	require.NoError(t, router.Delete(ctx, target))
-
-	exists, err := router.Exists(ctx, target)
-	require.NoError(t, err)
-	assert.False(t, exists)
-
-	// 削除は冪等。不在をエラーにするとリトライのたびに失敗します。
-	assert.NoError(t, router.Delete(ctx, target))
-}
-
-func TestHandlerList(t *testing.T) {
-	ctx := context.Background()
-	router := newTestRouter(t,
-		object("data/README.md", "a"),
-		object("data/dir-1/a.txt", "b"),
-		object("data/dir-1/b.txt", "c"),
-		object("data/dir-2/a.txt", "d"),
-		object("data-archive/old.txt", "e"),
+	store := newTestStore(t,
+		object("data/a.txt", "a"),
+		object("data/sub/b.txt", "b"),
+		object("data-archive/c.txt", "c"),
 	)
 
-	collect := func(prefix string, opts ...remoteio.ListOption) []string {
-		var got []string
-		require.NoError(t, router.List(ctx, uri(prefix), func(p string) error {
-			got = append(got, p)
-			return nil
-		}, opts...))
-		return got
-	}
+	t.Run("区切り文字ありは直下のみ、疑似ディレクトリは IsPrefix", func(t *testing.T) {
+		entries := collect(t, store.List(ctx, uri("data"), remoteio.WithDelimiter("/")))
+		assert.ElementsMatch(t, []string{"a.txt", "sub/"}, names(entries))
 
-	// 区切り文字なしの prefix は「ディレクトリ」ではなく素の文字列前方一致です。
-	// GCS / S3 の意味論そのままなので、data は data-archive/ にも一致します。
-	// ディレクトリとして扱いたい場合は末尾に区切り文字を付けるか WithDelimiter を使います。
-	t.Run("区切り文字なしは文字列前方一致で再帰的に列挙する", func(t *testing.T) {
-		assert.ElementsMatch(t, []string{
-			uri("data/README.md"),
-			uri("data/dir-1/a.txt"),
-			uri("data/dir-1/b.txt"),
-			uri("data/dir-2/a.txt"),
-			uri("data-archive/old.txt"),
-		}, collect("data"))
-	})
-
-	t.Run("末尾に区切り文字を付ければディレクトリ相当に絞れる", func(t *testing.T) {
-		assert.ElementsMatch(t, []string{
-			uri("data/README.md"),
-			uri("data/dir-1/a.txt"),
-			uri("data/dir-1/b.txt"),
-			uri("data/dir-2/a.txt"),
-		}, collect("data/"))
-	})
-
-	// 疑似ディレクトリは attrs.Name が空で attrs.Prefix に入るため、
-	// そこを取り違えると疑似ディレクトリの一覧が丸ごと落ちます。
-	t.Run("区切り文字ありでは直下と疑似ディレクトリを返す", func(t *testing.T) {
-		assert.ElementsMatch(t, []string{
-			uri("data/README.md"),
-			uri("data/dir-1/"),
-			uri("data/dir-2/"),
-		}, collect("data", remoteio.WithDelimiter("/")))
-	})
-
-	// WithDelimiter を使うと ListPrefix が末尾を補うため、data-archive/ は外れます。
-	t.Run("区切り文字ありではプレフィックスが正規化される", func(t *testing.T) {
-		for _, got := range collect("data", remoteio.WithDelimiter("/")) {
-			assert.NotContains(t, got, "data-archive")
+		for _, e := range entries {
+			if e.Name == "sub/" {
+				assert.True(t, e.IsPrefix, "attrs.Prefix を型のついた情報として渡すこと")
+				assert.Equal(t, uri("data/sub/"), e.URI)
+			} else {
+				assert.False(t, e.IsPrefix)
+			}
 		}
 	})
 
-	t.Run("callback のエラーで列挙を打ち切る", func(t *testing.T) {
-		sentinel := assert.AnError
-		err := router.List(ctx, uri("data"), func(string) error { return sentinel })
-		assert.ErrorIs(t, err, sentinel)
+	t.Run("区切り文字なしは配下を再帰的に返す", func(t *testing.T) {
+		entries := collect(t, store.List(ctx, uri("data")))
+		assert.ElementsMatch(t, []string{"a.txt", "sub/b.txt"}, names(entries))
+	})
+
+	// 素の前方一致にすると、"data" が "data-archive/" のオブジェクトまで拾います。
+	t.Run("プレフィックスは常に正規化され隣接する名前を拾わない", func(t *testing.T) {
+		entries := collect(t, store.List(ctx, uri("data")))
+		for _, e := range entries {
+			assert.NotContains(t, e.URI, "data-archive")
+		}
+	})
+
+	t.Run("break で打ち切れる", func(t *testing.T) {
+		var seen int
+		for _, err := range store.List(ctx, uri("data")) {
+			require.NoError(t, err)
+			seen++
+			break
+		}
+		assert.Equal(t, 1, seen)
 	})
 }
 
-// 未登録スキームは、対応していないことがそのまま分かるエラーになること。
-func TestRouterRejectsUnregisteredScheme(t *testing.T) {
+func TestWriteAndDelete(t *testing.T) {
 	ctx := context.Background()
-	router := newTestRouter(t)
+	store := newTestStore(t)
 
-	_, err := router.Open(ctx, "s3://other-bucket/obj")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "未対応のURIスキームです")
-}
+	t.Run("書いた内容を読み戻せる", func(t *testing.T) {
+		require.NoError(t, remoteio.WriteAll(ctx, store, uri("out/a.txt"), []byte("written"),
+			remoteio.WithContentType("text/plain"),
+			remoteio.WithCacheControl("no-store"),
+		))
 
-// nil クライアントでも panic せず、他の操作と同じくエラーで返ること。
-// List だけ parseObjectURI を通らないため、以前ここだけガードが抜けていました。
-func TestHandlerNilClient(t *testing.T) {
-	ctx := context.Background()
-	h := gcs.NewHandler(nil)
-
-	t.Run("Open", func(t *testing.T) {
-		_, err := h.Open(ctx, uri("a.txt"))
-		assert.ErrorContains(t, err, "未初期化")
-	})
-	t.Run("List", func(t *testing.T) {
-		err := h.List(ctx, uri("a"), func(string) error { return nil }, remoteio.NewListSettings())
-		assert.ErrorContains(t, err, "未初期化")
-	})
-	t.Run("Exists", func(t *testing.T) {
-		_, err := h.Exists(ctx, uri("a.txt"))
-		assert.ErrorContains(t, err, "未初期化")
-	})
-	t.Run("Write", func(t *testing.T) {
-		err := h.Write(ctx, uri("a.txt"), strings.NewReader("x"), remoteio.NewWriteSettings())
-		assert.ErrorContains(t, err, "未初期化")
-	})
-	t.Run("Delete", func(t *testing.T) {
-		assert.ErrorContains(t, h.Delete(ctx, uri("a.txt")), "未初期化")
-	})
-}
-
-// Stat がサイズ・更新時刻・Content-Type を返すこと。
-// Exists は真偽しか返さないため、これが無いとスキームごとの API を直接叩くことになります。
-func TestHandlerStat(t *testing.T) {
-	ctx := context.Background()
-	server := newFakeServer(t)
-	router := remoteio.NewSchemeRouter(gcs.NewHandler(server.Client()))
-
-	target := uri("stat/report.json")
-	require.NoError(t, router.Write(ctx, target, strings.NewReader(`{"a":1}`),
-		remoteio.WithContentType("application/json"),
-	))
-
-	t.Run("メタデータを返す", func(t *testing.T) {
-		info, err := router.Stat(ctx, target)
+		info, err := store.Stat(ctx, uri("out/a.txt"))
 		require.NoError(t, err)
-		assert.Equal(t, target, info.Path)
-		assert.Equal(t, int64(len(`{"a":1}`)), info.Size)
-		assert.Equal(t, "application/json", info.ContentType)
-		assert.False(t, info.ModTime.IsZero())
+		assert.Equal(t, "text/plain", info.ContentType)
+
+		data, err := remoteio.ReadAll(ctx, store, uri("out/a.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "written", string(data))
 	})
 
-	// 不在の判定が Open と揃っていることが、スキーム非依存に扱えるための条件です。
-	t.Run("不在は os.ErrNotExist を包んで返す", func(t *testing.T) {
-		_, err := router.Stat(ctx, uri("stat/missing.json"))
-		assert.ErrorIs(t, err, os.ErrNotExist)
+	t.Run("メタデータを保存する", func(t *testing.T) {
+		require.NoError(t, remoteio.WriteAll(ctx, store, uri("out/meta.txt"), []byte("x"),
+			remoteio.WithMetadata(map[string]string{"job-id": "j1"}),
+		))
+
+		info, err := store.Stat(ctx, uri("out/meta.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "j1", info.Metadata["job-id"])
 	})
 
-	t.Run("オブジェクト名が空の URI は拒否する", func(t *testing.T) {
-		_, err := router.Stat(ctx, remoteio.BuildGCSURI(testBucket, ""))
-		assert.ErrorContains(t, err, "オブジェクト名が空です")
+	t.Run("削除は冪等", func(t *testing.T) {
+		require.NoError(t, store.Delete(ctx, uri("out/a.txt")))
+		assert.NoError(t, store.Delete(ctx, uri("out/a.txt")))
+
+		ok, err := store.Exists(ctx, uri("out/a.txt"))
+		require.NoError(t, err)
+		assert.False(t, ok)
 	})
 }
 
-// WithMetadata がユーザー定義メタデータとして保存されること。
-func TestHandlerWriteMetadata(t *testing.T) {
+// failingReader は途中まで読めたあとに失敗するリーダーです。
+type failingReader struct{ r io.Reader }
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	if n, _ := f.r.Read(p); n > 0 {
+		return n, nil
+	}
+	return 0, errors.New("読み取り失敗")
+}
+
+// 書き込みの原子性の回帰テストです。
+//
+// 失敗経路で storage.Writer.Close() を呼ぶと、Close はアップロードを「完了」させる
+// API なので、失敗した書き込みが切り詰められたオブジェクトとして残ります。
+// 既存オブジェクトの上書き中なら元のデータが壊れます。実際にそうなっていた経路で、
+// このテストはそこを固定しています。
+func TestWriteIsAtomic(t *testing.T) {
 	ctx := context.Background()
-	server := newFakeServer(t)
-	router := remoteio.NewSchemeRouter(gcs.NewHandler(server.Client()))
+	store := newTestStore(t, object("out/existing.txt", "original"))
 
-	require.NoError(t, router.Write(ctx, uri("meta/a.txt"), strings.NewReader("x"),
-		remoteio.WithMetadata(map[string]string{"job-id": "42"}),
-	))
+	t.Run("失敗した書き込みはオブジェクトを作らない", func(t *testing.T) {
+		err := store.Write(ctx, uri("out/partial.txt"), &failingReader{r: strings.NewReader("partial-data")})
+		require.Error(t, err)
 
-	attrs, err := server.Client().Bucket(testBucket).Object("meta/a.txt").Attrs(ctx)
+		ok, existsErr := store.Exists(ctx, uri("out/partial.txt"))
+		require.NoError(t, existsErr)
+		assert.False(t, ok, "失敗した書き込みでオブジェクトが残ってはいけない")
+	})
+
+	t.Run("失敗した上書きは既存の内容を壊さない", func(t *testing.T) {
+		err := store.Write(ctx, uri("out/existing.txt"), &failingReader{r: strings.NewReader("partial-data")})
+		require.Error(t, err)
+
+		data, readErr := remoteio.ReadAll(ctx, store, uri("out/existing.txt"))
+		require.NoError(t, readErr)
+		assert.Equal(t, "original", string(data))
+	})
+}
+
+func TestWriteIfNotExists(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, remoteio.WriteAll(ctx, store, uri("once.txt"), []byte("first"), remoteio.WithIfNotExists()))
+
+	err := remoteio.WriteAll(ctx, store, uri("once.txt"), []byte("second"), remoteio.WithIfNotExists())
+	assert.ErrorIs(t, err, remoteio.ErrExist)
+
+	data, err := remoteio.ReadAll(ctx, store, uri("once.txt"))
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"job-id": "42"}, attrs.Metadata)
+	assert.Equal(t, "first", string(data), "既存の内容が保たれること")
+}
+
+// サーバーサイドコピーの確認です。
+//
+// これが無いと、利用側は CopierFrom を自前で呼ぶために別の GCS クライアントを
+// 持つことになります。
+// Copier を実装していることをコンパイル時に固定します。
+// これが外れると Copy は黙ってストリーム中継へ落ち、遅くなるだけで誰も気づきません。
+var _ remoteio.Copier = (*gcs.Handler)(nil)
+
+func TestCopyUsesServerSideCopy(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t, object("src/video.mp4", "payload"))
+
+	t.Run("同一スキームのコピー", func(t *testing.T) {
+		require.NoError(t, store.Copy(ctx, uri("src/video.mp4"), uri("dst/video.mp4")))
+
+		data, err := remoteio.ReadAll(ctx, store, uri("dst/video.mp4"))
+		require.NoError(t, err)
+		assert.Equal(t, "payload", string(data))
+
+		ok, err := store.Exists(ctx, uri("src/video.mp4"))
+		require.NoError(t, err)
+		assert.True(t, ok, "Copy はコピー元を残す")
+	})
+
+	t.Run("コピー元が無ければ ErrNotExist", func(t *testing.T) {
+		err := store.Copy(ctx, uri("src/missing.mp4"), uri("dst/missing.mp4"))
+		assert.ErrorIs(t, err, remoteio.ErrNotExist)
+	})
+}
+
+// gs:// のストアからローカルパスも読めることの確認です。
+// 開発時にローカルファイルへ差し替えられることが、この組み合わせの狙いです。
+func TestStoreAlsoHandlesLocalPaths(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	dir := t.TempDir()
+
+	require.NoError(t, remoteio.WriteAll(ctx, store, dir+"/local.txt", []byte("local")))
+	data, err := remoteio.ReadAll(ctx, store, dir+"/local.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "local", string(data))
+
+	t.Run("担当外のリモートスキームは明確に拒否する", func(t *testing.T) {
+		_, err := store.Open(ctx, "s3://other/key")
+		assert.ErrorIs(t, err, remoteio.ErrUnsupportedScheme)
+	})
+}
+
+// ハンドラは公開されているため直接呼ばれる余地があります。
+// 担当外のスキームを黙って処理すると、gs:// のつもりで s3:// のバケットを読みます。
+func TestHandlerRejectsForeignScheme(t *testing.T) {
+	ctx := context.Background()
+	server, err := fakestorage.NewServerWithOptions(fakestorage.Options{BucketsLocation: "US"})
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+
+	h := gcs.NewHandler(server.Client())
+	_, err = h.Open(ctx, "s3://other-bucket/key")
+	assert.ErrorIs(t, err, remoteio.ErrInvalidURI)
 }

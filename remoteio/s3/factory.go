@@ -1,9 +1,11 @@
-// Package s3 は、AWS S3 向けの remoteio.IOFactory 実装を提供します。
+// Package s3 は、Amazon S3 向けの remoteio.Handler と
+// そのライフサイクルを管理するファクトリを提供します。
 package s3
 
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -15,13 +17,16 @@ import (
 // DefaultRegion は、リージョンが解決できなかった場合に適用されるリージョンです。
 const DefaultRegion = "ap-northeast-1"
 
-// ClientFactory は AWS/S3クライアントとS3関連のI/Oコンポーネントを管理します。
+// ClientFactory は S3 クライアントのライフサイクルを持ちます。
+//
+// Close と各アクセサは並行に呼ばれても安全です。
 type ClientFactory struct {
+	mu        sync.RWMutex
 	client    *s3.Client
 	awsConfig aws.Config
 }
 
-var _ remoteio.IOFactory = (*ClientFactory)(nil)
+var _ remoteio.Factory = (*ClientFactory)(nil)
 
 // settings は Option を解決した結果です。
 type settings struct {
@@ -141,51 +146,22 @@ func clientOptions(cfg settings) []func(*s3.Options) {
 	return append(opts, cfg.s3Opts...)
 }
 
-// Close はインターフェース要件に準拠するために実装された no-op メソッドです。
+// Close はクライアントへの参照を手放します。冪等です。
+//
+// aws-sdk-go-v2 の s3.Client は明示的な Close を必要としませんが、
+// クローズ後のアクセサが ErrClosed を返す契約を GCS 側と揃えています。
 func (f *ClientFactory) Close() error {
-	// aws-sdk-go-v2 の s3.Client は Close 不要なため、フィールドを nil にして安全を確保します。
+	f.mu.Lock()
 	f.client = nil
+	f.mu.Unlock()
 	return nil
 }
 
-// --- Reader / InputReader 関連 ---
-
-// Reader は単一リソースの読み込み機能を提供します。
-func (f *ClientFactory) Reader() (remoteio.Reader, error) {
-	return f.InputReader()
-}
-
-// InputReader は、S3クライアントを注入した InputReader を生成します。
-func (f *ClientFactory) InputReader() (remoteio.InputReader, error) {
-	return f.router()
-}
-
-// --- Writer / OutputWriter 関連 ---
-
-// Writer は単一リソースの書き込み機能を提供します。
-func (f *ClientFactory) Writer() (remoteio.Writer, error) {
-	return f.OutputWriter()
-}
-
-// OutputWriter は、S3クライアントを注入した OutputWriter を生成します。
-func (f *ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	return f.router()
-}
-
-// --- その他 ---
-
-// URLSigner は、S3クライアントを注入した URLSigner の具象実装を返します。
-func (f *ClientFactory) URLSigner() (remoteio.URLSigner, error) {
-	client, err := f.s3Client()
-	if err != nil {
-		return nil, err
-	}
-	return NewURLSigner(client), nil
-}
-
-// SchemeHandler は s3:// を担当するハンドラを返します。
-// remoteio.NewMultiFactory が複数スキームを 1 つの Router に集約するために使います。
-func (f *ClientFactory) SchemeHandler() (remoteio.SchemeHandler, error) {
+// Handler は s3:// を担当するハンドラを返します。
+//
+// 複数のクラウドを 1 つの Store で扱いたい場合は、各ファクトリから取り出した
+// ハンドラを remoteio.NewStore へ並べてください。
+func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	client, err := f.s3Client()
 	if err != nil {
 		return nil, err
@@ -193,20 +169,23 @@ func (f *ClientFactory) SchemeHandler() (remoteio.SchemeHandler, error) {
 	return NewHandler(client), nil
 }
 
-// router は s3:// とローカル関連のパスを扱う Router を組み立てます
+// Store は s3:// とローカル関連のパスを扱う Store を返します
 // （gs:// は登録されないため明確に未対応となります）。
-func (f *ClientFactory) router() (*remoteio.Router, error) {
-	handler, err := f.SchemeHandler()
+func (f *ClientFactory) Store() (remoteio.Store, error) {
+	handler, err := f.Handler()
 	if err != nil {
 		return nil, err
 	}
-	return remoteio.NewSchemeRouter(handler), nil
+	return remoteio.NewStore(handler), nil
 }
 
-// s3Client は、ファクトリが保持するS3クライアントを返します（内部用）。
+// s3Client はクライアントが存命かを確かめて返します。
 func (f *ClientFactory) s3Client() (*s3.Client, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	if f.client == nil {
-		return nil, fmt.Errorf("S3クライアントは初期化されていないか、既にクローズされています")
+		return nil, fmt.Errorf("S3クライアントは初期化されていないか、既にクローズされています: %w", remoteio.ErrClosed)
 	}
 	return f.client, nil
 }

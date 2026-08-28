@@ -193,7 +193,21 @@ func (r *Router) SignURL(ctx context.Context, name, method string, expires time.
 
 // Sub は、プレフィックスに固定されたストアを返します。
 func (r *Router) Sub(prefix string) Store {
-	return &scopedStore{root: r, prefix: prefix}
+	return Sub(r, prefix)
+}
+
+// Sub は、任意の Store をプレフィックスに固定したストアを返します。
+//
+// Store を包んで振る舞いを足す型（呼び出しを記録するテストのフェイクなど）は、
+// Sub メソッドをこの関数へ委譲してください。埋め込みから昇格した Sub は
+// 埋め込まれた側をスコープの土台にするため、包んだ側の振る舞いが
+// スコープの先で失われます。
+//
+//	func (d *decorator) Sub(prefix string) remoteio.Store {
+//		return remoteio.Sub(d, prefix)
+//	}
+func Sub(store Store, prefix string) Store {
+	return &scopedStore{root: store, prefix: prefix}
 }
 
 // dispatch は、ハンドラを解決して値を返す操作へ委譲します。
@@ -219,7 +233,9 @@ func errSeq(err error) iter.Seq2[Entry, error] {
 // リポジトリごとに書き直しており、それでも足りずに "gs://" を直書きする箇所が
 // エコシステム全体で 24 箇所ありました。
 type scopedStore struct {
-	root   *Router
+	// root は Store インターフェースです。具象の Router に固定すると、
+	// Store を包んだ型が Sub を経た瞬間に素通しされます。
+	root   Store
 	prefix string
 }
 
@@ -306,5 +322,5 @@ func (s *scopedStore) SignURL(ctx context.Context, name, method string, expires 
 
 // Sub はスコープをさらに絞ったストアを返します。
 func (s *scopedStore) Sub(prefix string) Store {
-	return &scopedStore{root: s.root, prefix: Join(s.prefix, prefix)}
+	return Sub(s.root, Join(s.prefix, prefix))
 }

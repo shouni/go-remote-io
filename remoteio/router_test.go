@@ -405,3 +405,42 @@ func TestFileHandlerRoundTrip(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidURI)
 	})
 }
+
+// decoratingStore は Store を包んで Open の回数を数えるだけの型です。
+// Sub をライブラリの Sub へ委譲しているのが要点です。
+type decoratingStore struct {
+	Store
+	opens int
+}
+
+func (d *decoratingStore) Open(ctx context.Context, name string) (io.ReadCloser, error) {
+	d.opens++
+	return d.Store.Open(ctx, name)
+}
+
+// Sub は、スコープを絞ったあとも包んだ振る舞いを保ちます。
+// 埋め込みから昇格した Sub をそのまま使うと、土台が埋め込まれた側になり
+// ここでの記録が失われます。
+func (d *decoratingStore) Sub(prefix string) Store { return Sub(d, prefix) }
+
+func TestSubKeepsDecoratedBehaviour(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	dec := &decoratingStore{Store: NewStore()}
+	require.NoError(t, WriteAll(ctx, dec, filepath.Join(dir, "jobs", "a.txt"), []byte("x")))
+
+	jobs := dec.Sub(filepath.Join(dir, "jobs"))
+	data, err := ReadAll(ctx, jobs, "a.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(data))
+
+	assert.Equal(t, 1, dec.opens, "スコープ越しの Open も包んだ側を通ること")
+
+	t.Run("入れ子の Sub でも保たれる", func(t *testing.T) {
+		nested := jobs.Sub(".")
+		_, err := ReadAll(ctx, nested, "a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, 2, dec.opens)
+	})
+}

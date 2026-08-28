@@ -222,9 +222,12 @@ func TestListLocal(t *testing.T) {
 		assert.Equal(t, 1, seen)
 	})
 
-	t.Run("不在ディレクトリは ErrNotExist", func(t *testing.T) {
-		err := firstErr(t, store.List(ctx, filepath.Join(dir, "missing")))
-		assert.ErrorIs(t, err, ErrNotExist)
+	// リモートに「存在しないプレフィックス」という状態は無いため、
+	// ローカルだけエラーにすると同じ呼び出しがスキームによって別の意味になります。
+	// 契約は storetest の「何も無いプレフィックスの一覧は空でエラーにしない」です。
+	t.Run("不在ディレクトリは空の一覧", func(t *testing.T) {
+		entries := collect(t, store.List(ctx, filepath.Join(dir, "missing")))
+		assert.Empty(t, entries)
 	})
 }
 

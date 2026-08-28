@@ -88,6 +88,13 @@ func listLocalShallow(ctx context.Context, path, delimiter string) iter.Seq2[Ent
 	return func(yield func(Entry, error) bool) {
 		entries, err := os.ReadDir(path)
 		if err != nil {
+			// 不在のディレクトリは「何も無いプレフィックス」として空を返します。
+			// リモートに「存在しないプレフィックス」という状態は無いため、
+			// ここでエラーにすると同じ呼び出しがスキームによって別の意味になります。
+			// 権限エラーなど、不在以外の失敗はそのまま伝えます。
+			if errors.Is(err, fs.ErrNotExist) {
+				return
+			}
 			yield(Entry{}, wrapf(err, "ローカルディレクトリの読み込みに失敗しました (%s)", path))
 			return
 		}
@@ -159,7 +166,10 @@ func listLocalRecursive(ctx context.Context, root string) iter.Seq2[Entry, error
 		switch {
 		case err == nil, errors.Is(err, stop):
 			return
-		case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+		case errors.Is(err, fs.ErrNotExist):
+			// listLocalShallow と同じ理由で、不在は空の一覧として扱います。
+			return
+		case errors.Is(err, fs.ErrPermission):
 			yield(Entry{}, wrapf(err, "ローカルディレクトリの読み込みに失敗しました (%s)", root))
 		default:
 			yield(Entry{}, err)

@@ -153,9 +153,10 @@ func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption)
 	if srcHandler.Scheme() == dstHandler.Scheme() {
 		if copier, ok := srcHandler.(Copier); ok {
 			err := copier.CopyTo(ctx, src, dst)
-			// ErrNotSupported だけはストリーム中継へ落とします。Copier を
-			// 実装しているかどうかを構築時に決められないハンドラ（Lazy など）が
-			// 「実は対応していない」を実行時に伝える経路がこれです。
+			// ErrNotSupported だけはストリーム中継へ落とします。サーバーサイド
+			// コピーの可否は対象によって変わることがあり（S3 の CopyObject は
+			// 5GB を超えると使えません）、実装がそれを実行時に伝えられないと、
+			// 呼び出し側が「大きいときだけ別の書き方」を持つことになります。
 			if err == nil {
 				return nil
 			}

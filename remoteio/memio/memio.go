@@ -137,6 +137,34 @@ func (h *Handler) URIs() []string {
 	return out
 }
 
+// Options は、保存時に解決された WriteOptions を返します。
+//
+// Content-Type や Cache-Control が意図どおり渡ったかを確かめるためのものです。
+// ObjectInfo に載るのは Content-Type と Metadata だけで、Cache-Control や
+// Content-Disposition は抽象の外から観測できません。利用側がそれを検証するために
+// 「最後に渡された設定」を自前で持つフェイクを書いていたので、
+// ここで受け持ちます。
+func (h *Handler) Options(uri string) (remoteio.WriteOptions, bool) {
+	bucket, key, err := h.parseObject(uri)
+	if err != nil {
+		return remoteio.WriteOptions{}, false
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	obj, ok := h.objects[path(bucket, key)]
+	if !ok {
+		return remoteio.WriteOptions{}, false
+	}
+	return remoteio.WriteOptions{
+		ContentType:        obj.contentType,
+		CacheControl:       obj.cacheControl,
+		ContentDisposition: obj.contentDisposition,
+		Metadata:           maps.Clone(obj.metadata),
+	}, true
+}
+
 // Len は保存されているオブジェクト数を返します。
 func (h *Handler) Len() int {
 	h.mu.RLock()

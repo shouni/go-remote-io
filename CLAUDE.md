@@ -120,9 +120,8 @@ for entry, err := range store.List(ctx, "jobs", remoteio.WithDelimiter("/")) {
 
 `uri.go` のパス操作 (`Dir` / `Join`) は `net/url` を通しません。`gs://` / `s3://` は URL ではなく「スキーム + バケット + 生のキー」で、オブジェクト名の空白や `?` を URL として組み直すと `%20` やクエリ区切りに化けます。`ParseURI` はデコードしないため、化けた URI はエラーにならずに別のキーを指します。同じ理由で `filepath.Dir` もリモート URI には使いません（Windows でセパレータが混ざります）。
 
-### `Lazy` と `FS`
+### `FS`
 
-* **`Lazy(scheme, open)`** (`lazy.go`) は初回の操作までハンドラの生成を遅らせます。対応スキームを構築時に宣言したいけれど、そのスキームが使われるとは限らない場面（HTTP も GCS も S3 も受け付けるリーダーなど）で、使いもしないクラウドの認証で起動が失敗するのを避けます。生成は成功・失敗とも 1 度だけです。
 * **`FS(ctx, store)`** (`fs.go`) は `Store` を読み取り専用の `io/fs.FS` として見せます。`io/fs` をコア抽象にしていないのは `fs.FS.Open` が context を取らないためです。ネットワーク I/O にキャンセルと期限を渡せないインターフェースは土台にできません。アダプタ側では ctx を構造体に持たせています（通常は避ける形ですが、`fs.FS` を満たす唯一の方法です）。
 
 ### ファイル分割の規則
@@ -134,6 +133,7 @@ for entry, err := range store.List(ctx, "jobs", remoteio.WithDelimiter("/")) {
 ### ファクトリ
 
 * `Factory` (`store.go`) は `Close` / `Store()` / `Handler()` を要求します。`Handler()` があるので、複数クラウドを束ねるための別インターフェースは要りません。
+* **遅延生成はライブラリ側で持ちません。** 一度 `Lazy(scheme, open)` を用意しましたが、利用側が実際にキャッシュしたいのは `Handler` ではなく `Factory` の**寿命**（`Close` と解放後の利用拒否）でした。`Handler` に寿命は無いので `Lazy` では足りず、利用者ゼロのまま公開 API を増やすだけになるため削除しています。必要になったら、そのとき実需の形が分かった状態で足してください。
 * 生成方法は `Option` で差し替えます (`gcs.WithClient` / `s3.WithEndpoint` など)。`WithClient` で注入されたクライアントのライフサイクルは呼び出し元に残り、`Close` は閉じません（GCS は `ownsClient` で管理）。
 * **`Close` と各アクセサは並行に呼ばれても安全です** (`sync.RWMutex`)。以前はクライアントのフィールドを無同期で nil にしていました。CI は `-race` 付きですが、並行に触るテストが無く検出されていませんでした。`Close` は冪等で、以降のアクセサは `ErrClosed` を返します。
 * S3 のリージョン未設定時のデフォルトは `ap-northeast-1` (`s3.DefaultRegion`)。優先順は `WithRegion` > 環境や設定ファイル > 既定値。

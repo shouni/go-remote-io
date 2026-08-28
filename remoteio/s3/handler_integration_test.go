@@ -28,7 +28,7 @@ const testBucket = "test-bucket"
 //
 // docker も AWS 認証情報も要りません。フェイクは平文 HTTP で待ち受けるため、
 // TLS が無い S3 互換エンドポイント（MinIO や R2 のセルフホスト）と同じ条件になります。
-// v1 の PutObject 直呼びはこの条件で非 Seeker のボディを一切書けませんでした。
+// PutObject 直呼びはこの条件で非 Seeker のボディを一切書けません。
 func newTestStore(t *testing.T, objects map[string]string) remoteio.Store {
 	t.Helper()
 
@@ -186,9 +186,9 @@ func (n *nonSeeker) Read(p []byte) (int, error) { return n.r.Read(p) }
 
 // 非 Seeker のボディを書けることの回帰テストです。
 //
-// v1 は PutObject へ生の io.Reader を渡していたため、TLS でないエンドポイントでは
+// PutObject へ生の io.Reader を渡すと、TLS でないエンドポイントでは
 // 「unseekable stream is not supported without TLS and trailing checksum」で
-// 必ず失敗しました。本番の AWS (https) は通るので気づきにくく、MinIO や R2 の
+// 必ず失敗します。本番の AWS (https) は通るので気づきにくく、MinIO や R2 の
 // 平文エンドポイント、そしてクロスクラウドの Copy が壊れていた経路です。
 func TestWriteAcceptsNonSeekableBody(t *testing.T) {
 	ctx := context.Background()

@@ -15,9 +15,7 @@ import (
 
 // ClientFactory は、GCS クライアントのライフサイクルを持ちます。
 //
-// Close と各アクセサは並行に呼ばれても安全です。v1 はクライアントのフィールドを
-// 無同期で nil にしていたため、Close と読み出しが競合していました
-// （CI は -race 付きですが、並行に触るテストが無く検出されていませんでした）。
+// Close と各アクセサは並行に呼ばれても安全です。
 type ClientFactory struct {
 	mu     sync.RWMutex
 	client *storage.Client
@@ -90,8 +88,7 @@ func (f *ClientFactory) Close() error {
 // Handler は gs:// を担当するハンドラを返します。
 //
 // 複数のクラウドを 1 つの Store で扱いたい場合は、各ファクトリから取り出した
-// ハンドラを remoteio.NewStore へ並べてください。v1 の MultiFactory と
-// HandlerProvider は、そのために必要だった足場です。
+// ハンドラを remoteio.NewStore へ並べてください。
 func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	client, err := f.gcsClient()
 	if err != nil {

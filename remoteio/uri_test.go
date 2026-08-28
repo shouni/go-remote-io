@@ -108,8 +108,8 @@ func TestBuildURIRoundTrip(t *testing.T) {
 	}
 }
 
-// v1 は区切り文字を指定したときだけ正規化していたため、"data" が "data-archive/" にも
-// 一致していました。v2 は常に正規化します。
+// 区切り文字を指定したときだけ正規化する形だと、"data" が "data-archive/" にも
+// 一致します。常に正規化するのはそれを防ぐためです。
 func TestListPrefixAlwaysNormalizes(t *testing.T) {
 	tests := []struct {
 		name string

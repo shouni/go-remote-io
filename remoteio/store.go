@@ -44,10 +44,8 @@ type Writer interface {
 // ルートの Store（NewStore の戻り値）は完全な URI とローカルパスを受け取ります。
 // Sub で得たストアはプレフィックスに固定され、そこからの相対名だけを受け取ります。
 //
-// v1 は InputReader / OutputWriter / URLSigner という 3 つの複合インターフェースを
-// 別々に取り出して構造体へ詰め直す形でした。利用側はほぼ必ず 3 つとも要るのに
-// 別々に持ち回ることになり、Bundle という「3 つをまとめるだけの型」も必要でした。
-// Store はその 3 つを 1 つにしたものです。
+// 読み・書き・署名を 1 つにまとめているのは、利用側がほぼ必ず 3 つとも要るためです。
+// 別々のインターフェースにすると、それらを束ねるだけの型を利用側が持つことになります。
 type Store interface {
 	Reader
 	Writer
@@ -57,10 +55,10 @@ type Store interface {
 
 	// Exists は対象の有無を返します。不在は (false, nil) です。
 	//
-	// 「オブジェクトが在るか」だけを見ます。ローカルのディレクトリや
-	// リモートの疑似ディレクトリは対象になりません（v1 はローカルだけ
-	// ディレクトリに true を返しており、スキームで意味が違っていました）。
-	// 階層の有無を知りたい場合は List を使ってください。
+	// 「オブジェクトが在るか」だけを見ます。ローカルのディレクトリも
+	// リモートの疑似ディレクトリも対象になりません。リモートにディレクトリという
+	// 実体は無いため、ローカルだけ真を返すと同じ呼び出しがスキームによって
+	// 別の意味になります。階層の有無を知りたい場合は List を使ってください。
 	Exists(ctx context.Context, name string) (bool, error)
 
 	// List は name 配下を列挙します。プレフィックスは常に「その階層の中身」を指す形へ
@@ -137,10 +135,9 @@ func Move(ctx context.Context, s Store, src, dst string, opts ...WriteOption) er
 // Handler を取り出せることを表します。gcs.ClientFactory と s3.ClientFactory が
 // 実装しています。
 //
-// v1 の IOFactory は InputReader / OutputWriter / URLSigner を別々に返す形で、
-// そこからは「どのスキームを担当しているか」が分かりませんでした。複数のクラウドを
-// 1 つに束ねるために HandlerProvider という別のインターフェースが必要だった原因が
-// これです。Handler を返せば足りるため、両方をここへ畳んでいます。
+// Handler も返すのは、複数のクラウドを 1 つの Store へ束ねるときに担当スキームが
+// 要るためです。Store だけを返す形にすると、束ねる側が「このファクトリはどのスキームか」
+// を知る別の口を要求することになります。
 type Factory interface {
 	io.Closer
 

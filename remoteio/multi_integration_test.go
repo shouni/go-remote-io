@@ -27,9 +27,6 @@ import (
 const bucket = "test-bucket"
 
 // newMultiStore は、GCS と S3 の両方のフェイクを 1 つの Store に束ねて返します。
-//
-// v1 はこれを MultiFactory と HandlerProvider という専用の足場で実現していました。
-// ファクトリが Handler を返せば NewStore に並べるだけで済むため、両方とも要りません。
 func newMultiStore(t *testing.T) remoteio.Store {
 	t.Helper()
 
@@ -97,8 +94,8 @@ func TestMultiSchemeStore(t *testing.T) {
 	})
 
 	// クロスクラウドのコピーは、コピー元のストリームが io.Seeker ではありません。
-	// v1 の S3 側は PutObject 直呼びだったため、平文エンドポイントではここが
-	// 「unseekable stream is not supported without TLS」で必ず失敗していました。
+	// S3 側が PutObject 直呼びだと、平文エンドポイントではここが
+	// 「unseekable stream is not supported without TLS」で必ず失敗します。
 	t.Run("GCS から S3 へコピーできる", func(t *testing.T) {
 		require.NoError(t, remoteio.WriteAll(ctx, store, gcsURI("src/payload.bin"), []byte("cross-cloud")))
 		require.NoError(t, store.Copy(ctx, gcsURI("src/payload.bin"), s3URI("dst/payload.bin")))
@@ -118,9 +115,6 @@ func TestMultiSchemeStore(t *testing.T) {
 	})
 
 	t.Run("署名器はスキームごとに振り分けられる", func(t *testing.T) {
-		// v1 は署名器が独立インターフェースだったため、束ねる側が signerRouter という
-		// 専用の振り分けを別に持っていました。Signer を任意インターフェースにしたので
-		// 振り分けは Router の 1 箇所だけです。
 		signed, err := store.SignURL(ctx, s3URI("a.txt"), "GET", 60)
 		require.NoError(t, err)
 		assert.Contains(t, signed, "X-Amz-Signature")

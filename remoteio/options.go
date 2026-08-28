@@ -10,9 +10,8 @@ const DefaultContentType = "text/plain; charset=utf-8"
 
 // ListOptions は ListOption を解決した結果で、Handler.List が受け取ります。
 //
-// 解決関数を公開していないのは、実装対象が Handler 1 本に絞られたためです。
-// v1 は Lister と SchemeHandler の 2 系統が別々の形でオプションを受けており、
-// そのために NewListSettings と ListPrefix を公開する必要がありました。
+// 解決関数を公開していないのは、実装対象が Handler 1 本に絞られているためです。
+// 実装側は解決済みの値だけを受け取ります。
 type ListOptions struct {
 	// Delimiter は階層の区切り文字です。
 	// 空文字ならプレフィックス配下を再帰的に列挙します。

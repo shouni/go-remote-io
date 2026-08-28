@@ -135,8 +135,7 @@ func TestList(t *testing.T) {
 		assert.ElementsMatch(t, []string{"a.txt", "sub/b.txt"}, names(entries))
 	})
 
-	// v1 は区切り文字を指定しないと素の前方一致だったため、
-	// "data" が "data-archive/" のオブジェクトまで拾っていました。
+	// 素の前方一致にすると、"data" が "data-archive/" のオブジェクトまで拾います。
 	t.Run("プレフィックスは常に正規化され隣接する名前を拾わない", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data")))
 		for _, e := range entries {
@@ -206,10 +205,10 @@ func (f *failingReader) Read(p []byte) (int, error) {
 
 // 書き込みの原子性の回帰テストです。
 //
-// v1 は io.Copy が失敗したときに storage.Writer.Close() を呼んでいました。
-// Close はアップロードを「完了」させる API なので、失敗した書き込みが
-// 切り詰められたオブジェクトとして残り、既存オブジェクトの上書き中なら
-// 元のデータが壊れていました。中断は ctx のキャンセルが正規の手段です。
+// 失敗経路で storage.Writer.Close() を呼ぶと、Close はアップロードを「完了」させる
+// API なので、失敗した書き込みが切り詰められたオブジェクトとして残ります。
+// 既存オブジェクトの上書き中なら元のデータが壊れます。実際にそうなっていた経路で、
+// このテストはそこを固定しています。
 func TestWriteIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, object("out/existing.txt", "original"))
@@ -249,8 +248,8 @@ func TestWriteIfNotExists(t *testing.T) {
 
 // サーバーサイドコピーの確認です。
 //
-// v1 にこれが無かったため、利用側は CopierFrom を自前で呼ぶために
-// Bundle とは別の GCS クライアントを持つ必要がありました。
+// これが無いと、利用側は CopierFrom を自前で呼ぶために別の GCS クライアントを
+// 持つことになります。
 // Copier を実装していることをコンパイル時に固定します。
 // これが外れると Copy は黙ってストリーム中継へ落ち、遅くなるだけで誰も気づきません。
 var _ remoteio.Copier = (*gcs.Handler)(nil)

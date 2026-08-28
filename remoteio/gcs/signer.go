@@ -15,11 +15,7 @@ var zeroTime time.Time
 
 // SignURL は GCS URI に対応する署名付き URL を生成します。
 //
-// remoteio.Signer の実装です。v1 は URLSigner を独立したインターフェースにし、
-// 専用の型 (urlSigner) とスキームごとの振り分け (signerRouter) を別に持っていました。
-// ハンドラの任意機能にすることで、振り分けは Router の 1 箇所へ戻ります。
-//
-// スキームは厳格で、gs:// 以外は受け付けません。
+// remoteio.Signer の実装です。スキームは厳格で、gs:// 以外は受け付けません。
 func (h *Handler) SignURL(_ context.Context, uri, method string, expires time.Duration) (string, error) {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {

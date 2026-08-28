@@ -1,4 +1,5 @@
-// Package s3 は、AWS S3 向けの remoteio.IOFactory 実装を提供します。
+// Package s3 は、Amazon S3 向けの remoteio.Handler と
+// そのライフサイクルを管理するファクトリを提供します。
 package s3
 
 import (
@@ -18,8 +19,7 @@ const DefaultRegion = "ap-northeast-1"
 
 // ClientFactory は S3 クライアントのライフサイクルを持ちます。
 //
-// Close と各アクセサは並行に呼ばれても安全です。v1 はクライアントのフィールドを
-// 無同期で nil にしていたため、Close と読み出しが競合していました。
+// Close と各アクセサは並行に呼ばれても安全です。
 type ClientFactory struct {
 	mu        sync.RWMutex
 	client    *s3.Client

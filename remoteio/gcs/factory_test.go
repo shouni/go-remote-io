@@ -75,8 +75,8 @@ func TestFactoryClose(t *testing.T) {
 }
 
 // Close と各アクセサが並行に呼ばれても安全であることの確認です。
-// v1 はクライアントのフィールドを無同期で nil にしていました
-// （CI は -race 付きですが、並行に触るテストが無く検出されていませんでした）。
+// クライアントのフィールドを無同期で nil にすると Close と読み出しが競合しますが、
+// 並行に触るテストが無いと -race を付けていても検出されません。
 func TestFactoryCloseIsRaceFree(t *testing.T) {
 	factory := newTestFactory(t)
 

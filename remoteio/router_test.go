@@ -80,7 +80,7 @@ func TestRouterResolve(t *testing.T) {
 }
 
 // Exists の意味をスキーム間で揃えたことの確認です。
-// v1 はローカルだけディレクトリに true を返していました。
+// ローカルだけディレクトリに true を返すと、同じ呼び出しがスキームで別の意味になります。
 func TestExistsIsAboutObjectsOnly(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore()
@@ -203,7 +203,7 @@ func TestListLocal(t *testing.T) {
 		}
 	})
 
-	// v1 は区切り文字を指定しないとき素の前方一致だったため、
+	// 区切り文字を指定しないとき素の前方一致にすると、
 	// "data" が "data-archive/" まで拾っていました。
 	t.Run("プレフィックスは常に正規化される", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "data")))

@@ -22,8 +22,7 @@ const Scheme = remoteio.SchemeGCS
 // Handler は Google Cloud Storage を扱う remoteio.Handler です。
 //
 // サーバーサイドコピー (remoteio.Copier) と署名付き URL (remoteio.Signer) の
-// 任意インターフェースも実装します。どちらも同じクライアントで足りるため、
-// v1 のように署名器だけ別の型として持ち回る必要はありません。
+// 任意インターフェースも実装します。
 type Handler struct {
 	client *storage.Client
 }
@@ -110,8 +109,6 @@ func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOption
 			}
 
 			// 区切り文字を指定したとき、疑似ディレクトリは Name が空で Prefix に入ります。
-			// v1 はここで両者を文字列へ潰していたため、呼び出し側が末尾の "/" を
-			// 見て判定し直す必要がありました。
 			entry := remoteio.Entry{
 				Size:    attrs.Size,
 				ModTime: attrs.Updated,
@@ -137,11 +134,10 @@ func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOption
 
 // Write は GCS オブジェクトへ書き込みます。
 //
-// 途中で失敗した場合はアップロードを中断するため、切り詰められたオブジェクトは
-// 残りません。storage.Writer.Close() はアップロードを「完了」させる API なので、
-// 失敗経路でそのまま呼んではいけません（v1 はこれを呼んでおり、失敗した書き込みが
-// 中途半端なオブジェクトとして残っていました）。中断の手順は io.Copy の
-// 失敗経路のコメントを参照してください。
+// 失敗経路で storage.Writer.Close() をそのまま呼んではいけません。あれは
+// アップロードを「完了」させる API なので、呼べば失敗した書き込みが中途半端な
+// オブジェクトとして残ります。中断の手順は io.Copy の失敗経路のコメントにあります。
+// 正しく中断する限り、切り詰められたオブジェクトは残りません。
 func (h *Handler) Write(ctx context.Context, uri string, src io.Reader, opts remoteio.WriteOptions) error {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {

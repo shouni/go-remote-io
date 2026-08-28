@@ -54,10 +54,7 @@ func (localHandler) Open(_ context.Context, path string) (io.ReadCloser, error) 
 // Stat はローカルファイルのメタデータを返します。
 // ローカルファイルシステムは Content-Type を保持しないため、ContentType は空です。
 //
-// ディレクトリは ErrNotExist を返します。リモートにディレクトリという実体は無く、
-// ここだけ成功すると Exists の意味がスキームによって変わるためです
-// （v1 はローカルだけディレクトリに true を返していました）。
-// 階層の有無を知りたい場合は List を使ってください。
+// ディレクトリは ErrNotExist を返します。理由は Store.Exists の doc を参照してください。
 func (localHandler) Stat(_ context.Context, path string) (ObjectInfo, error) {
 	info, err := os.Stat(path)
 	if err != nil {

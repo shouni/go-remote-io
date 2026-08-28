@@ -41,13 +41,13 @@ jobs := store.Sub("gs://bucket/jobs")             // 組み立て時に一度だ
 err = jobs.Write(ctx, id+"/status.json", body, remoteio.WithContentType("application/json"))
 ```
 
-* **`Store`** (`store.go`) が利用側の窓口です。`Open` / `Stat` / `Exists` / `List` / `Write` / `Delete` / `Copy` / `SignURL` / `Sub` を持ちます。依存を絞りたい関数は `Reader` (`Open` だけ) や `Writer` (`Write` だけ) を受け取ってください。
-* **`Handler`** (`handler.go`) が唯一の拡張点です。新しいストレージへ広げるときに実装するのはこれ 1 本。オプションの解決はライブラリ側で完結するため、実装側は解決済みの `ListOptions` / `WriteOptions` を受け取ります。
+* **`Store`** が利用側の窓口です。`Open` / `Stat` / `Exists` / `List` / `Write` / `Delete` / `Copy` / `SignURL` / `Sub` を持ちます。依存を絞りたい関数は `Reader` (`Open` だけ) や `Writer` (`Write` だけ) を受け取ってください。
+* **`Handler`** が唯一の拡張点です。新しいストレージへ広げるときに実装するのはこれ 1 本。オプションの解決はライブラリ側で完結するため、実装側は解決済みの `ListOptions` / `WriteOptions` を受け取ります。
   * 以前は拡張点が 2 系統ありました（可変長オプションを受ける `Lister` などと、解決済み設定を受ける `SchemeHandler`）。そのために `NewListSettings` / `ListPrefix` / `NewWriteSettings` を公開する必要があり、しかもそれらを使っていたのはテストのフェイクだけでした。
   * `Exists` は `Handler` にありません。`Stat` + `errors.Is(err, ErrNotExist)` から導出できるので、実装が 1 つ減り「不在を `(false, nil)` で返す」約束を取り違える余地も消えます。
-* **`Copier` / `Signer`** (`handler.go`) は任意インターフェースです。実装できるハンドラだけが実装します。`Store.Copy` は src と dst が同じスキームに解決され、かつ `Copier` を実装しているときだけサーバーサイドコピーへ落とし、そうでなければストリームで中継します。**呼び出し側に分岐は要りません。**
+* **`Copier` / `Signer`** は任意インターフェースです。実装できるハンドラだけが実装します。`Store.Copy` は src と dst が同じスキームに解決され、かつ `Copier` を実装しているときだけサーバーサイドコピーへ落とし、そうでなければストリームで中継します。**呼び出し側に分岐は要りません。**
   * `CopyTo` が `ErrNotSupported` を返した場合もストリーム中継へ落ちます。構築時に対応可否を決められないハンドラ (`Lazy`) が実行時にそれを伝える経路です。
-* **`Router`** (`router.go`) が `Store` の実体で、URI のスキームを見てハンドラを引きます。振り分けが実行時なのは、パスが設定やユーザー入力から来る以上どのスキームを扱うか静的に決められないためです。一方「どのスキームに対応しているか」は構築時に決まるので、ハンドラの集合という明示的なデータとして持ちます。**未対応の判定は `Router.resolve` の 1 箇所だけ**です。
+* **`Router`** が `Store` の実体で、URI のスキームを見てハンドラを引きます。振り分けが実行時なのは、パスが設定やユーザー入力から来る以上どのスキームを扱うか静的に決められないためです。一方「どのスキームに対応しているか」は構築時に決まるので、ハンドラの集合という明示的なデータとして持ちます。**未対応の判定は `Router.resolve` の 1 箇所だけ**です。
 * `Scheme()` が空文字のハンドラ (`NewLocalHandler`) はフォールバックになり、スキームを持たないパスを受け取ります。`NewStore` はリモート用ハンドラにローカルと `file://` を必ず組にして登録するので、**gcs ファクトリから得た Store でもローカルパスは読めます**が、`s3://` は未登録として明確に拒否されます。
 * 複数クラウドを 1 つの `Store` にするには、各ファクトリの `Handler()` を `NewStore` へ並べるだけです。以前はこれに `MultiFactory` と `HandlerProvider`、そして署名器専用の `signerRouter` が必要でした。`Signer` を任意インターフェースにしたので振り分けは `Router` の 1 箇所へ戻っています。
 * `Router.Schemes()` は辞書順で返します。map の反復順のままだと、公開 API なのに呼び出しごとに結果が変わります。
@@ -88,7 +88,7 @@ for entry, err := range store.List(ctx, "jobs", remoteio.WithDelimiter("/")) {
 
 ### エラーの約束事
 
-番兵は `errors.go` に集約しています。呼び出し側がメッセージ文字列ではなく `errors.Is` で分岐できることが、この抽象が成立する条件です。
+番兵は 1 箇所に集約しています。呼び出し側がメッセージ文字列ではなく `errors.Is` で分岐できることが、この抽象が成立する条件です。
 
 | 番兵 | 意味 |
 | :-- | :-- |
@@ -100,7 +100,7 @@ for entry, err := range store.List(ctx, "jobs", remoteio.WithDelimiter("/")) {
 | `ErrAbsoluteName` | スコープ付きストアへ絶対 URI を渡した |
 | `ErrInvalidURI` | URI の形が想定と違う |
 
-* ラップは `wrapf` (`errors.go`) を通します。番兵を保ったまま日本語の文脈を付ける形を全ファイルで揃えるためです。
+* ラップは `wrapf` を通します。番兵を保ったまま日本語の文脈を付ける形を全ファイルで揃えるためです。
 * **`Exists` はオブジェクトの有無だけを見ます。** ローカルのディレクトリもリモートの疑似ディレクトリも `false` です。ローカルの `Stat` と `Open` はディレクトリに `ErrNotExist` を返します（`os.Open` はディレクトリでも成功し読む時点で初めて失敗するため、そのままだとローカルだけ「開けるが読めないもの」が存在します）。階層の有無は `List` で見てください。
 * オブジェクト単位の操作は、オブジェクト名が空の URI (`gs://bucket` など) を明示的に拒否します (`ParseObjectURI`)。バケット操作と取り違えたり、不在なのか URI 不正なのか区別できなくなるのを防ぐためです。一覧だけはプレフィックスが空でも意味を持つので `ParseBucketURI` を使います。
 * ハンドラは担当外のスキームを拒否します。`Store` 経由なら振り分けで弾かれますが、ハンドラは公開されているため直接呼ばれる余地があります（以前は `gcs.Handler.Open(ctx, "s3://b/k")` が GCS のバケット b を読んでいました）。
@@ -108,9 +108,9 @@ for entry, err := range store.List(ctx, "jobs", remoteio.WithDelimiter("/")) {
 
 ### スキームの語彙
 
-定数は `uri.go` の 1 ブロックに集約しています。**公開するのは区切りを含まない名前 (`SchemeGCS = "gs"`) だけ**で、`Handler.Scheme()` も `Router` の登録キーもこの形です（RFC 3986 に合わせています。以前はプレフィックス `"gs://"` の形を公開していました）。
+定数は 1 ブロックに集約しています。**公開するのは区切りを含まない名前 (`SchemeGCS = "gs"`) だけ**で、`Handler.Scheme()` も `Router` の登録キーもこの形です（RFC 3986 に合わせています。以前はプレフィックス `"gs://"` の形を公開していました）。
 
-区切りを足す操作は `uri.go` の中だけに閉じています。呼び出し側が `"://"` を自前で連結する必要はありません:
+区切りを足す操作はスキームの語彙を定義する場所だけに閉じています。呼び出し側が `"://"` を自前で連結する必要はありません:
 
 * `Scheme(uri)` — URI からスキーム名を取り出す（ローカルパスなら空文字）
 * `HasScheme(uri, scheme)` — 判定。素の `strings.HasPrefix` だと `"gsfoo://..."` まで拾います
@@ -118,21 +118,28 @@ for entry, err := range store.List(ctx, "jobs", remoteio.WithDelimiter("/")) {
 
 ### URI とパスのユーティリティ
 
-`uri.go` のパス操作 (`Dir` / `Join`) は `net/url` を通しません。`gs://` / `s3://` は URL ではなく「スキーム + バケット + 生のキー」で、オブジェクト名の空白や `?` を URL として組み直すと `%20` やクエリ区切りに化けます。`ParseURI` はデコードしないため、化けた URI はエラーにならずに別のキーを指します。同じ理由で `filepath.Dir` もリモート URI には使いません（Windows でセパレータが混ざります）。
+パス操作 (`Dir` / `Join`) は `net/url` を通しません。`gs://` / `s3://` は URL ではなく「スキーム + バケット + 生のキー」で、オブジェクト名の空白や `?` を URL として組み直すと `%20` やクエリ区切りに化けます。`ParseURI` はデコードしないため、化けた URI はエラーにならずに別のキーを指します。同じ理由で `filepath.Dir` もリモート URI には使いません（Windows でセパレータが混ざります）。
 
 ### `FS`
 
-* **`FS(ctx, store)`** (`fs.go`) は `Store` を読み取り専用の `io/fs.FS` として見せます。`io/fs` をコア抽象にしていないのは `fs.FS.Open` が context を取らないためです。ネットワーク I/O にキャンセルと期限を渡せないインターフェースは土台にできません。アダプタ側では ctx を構造体に持たせています（通常は避ける形ですが、`fs.FS` を満たす唯一の方法です）。
+* **`FS(ctx, store)`** は `Store` を読み取り専用の `io/fs.FS` として見せます。`io/fs` をコア抽象にしていないのは `fs.FS.Open` が context を取らないためです。ネットワーク I/O にキャンセルと期限を渡せないインターフェースは土台にできません。アダプタ側では ctx を構造体に持たせています（通常は避ける形ですが、`fs.FS` を満たす唯一の方法です）。
 
-### ファイル分割の規則
+### パッケージの責務
 
-`remoteio` パッケージは**クラウド SDK を import しません**。GCS/AWS の SDK に触れてよいのは `remoteio/gcs` と `remoteio/s3` だけです。抽象だけを使うアプリケーションのビルドにクラウド SDK を持ち込まないための境界なので、`remoteio` 直下に SDK 依存を足さないでください。
+| パッケージ | 持つもの |
+| :-- | :-- |
+| `remoteio` | 抽象（`Store` / `Handler` / `Entry` / エラーの語彙 / URI とパスの操作）とローカル・`file://` の実装 |
+| `remoteio/gcs`, `remoteio/s3` | クラウド SDK に触れる唯一の場所。クライアントの寿命 (`Option`) と `Handler` / `Copier` / `Signer` の実装 |
+| `remoteio/memio` | インメモリの `Handler`。テストで本物の代わりに使う |
+| `remoteio/storetest` | `Handler` の適合性テストスイート |
 
-各スキームパッケージは `factory.go`（クライアントのライフサイクルと `Option`）、`handler.go`（`Handler` と `Copier` の実装）、`signer.go`（`Signer` の実装）の 3 つに分かれます。URI の分解は `parseObjectURI`（オブジェクト名必須）か `parseBucketURI`（一覧など、プレフィックスが空でもよい場合）を通してください。どちらもクライアントの nil チェックを含み、その先は `remoteio` 側の共通関数です。
+`remoteio` パッケージは**クラウド SDK を import しません**。抽象だけを使うアプリケーションのビルドにクラウド SDK を持ち込まないための境界なので、`remoteio` 直下に SDK 依存を足さないでください。
+
+スキームパッケージでの URI の分解は `parseObjectURI`（オブジェクト名必須）か `parseBucketURI`（一覧など、プレフィックスが空でもよい場合）を通してください。どちらもクライアントの nil チェックを含み、その先は `remoteio` 側の共通関数です。
 
 ### ファクトリ
 
-* `Factory` (`store.go`) は `Close` / `Store()` / `Handler()` を要求します。`Handler()` があるので、複数クラウドを束ねるための別インターフェースは要りません。
+* `Factory` は `Close` / `Store()` / `Handler()` を要求します。`Handler()` があるので、複数クラウドを束ねるための別インターフェースは要りません。
 * **遅延生成はライブラリ側で持ちません。** 一度 `Lazy(scheme, open)` を用意しましたが、利用側が実際にキャッシュしたいのは `Handler` ではなく `Factory` の**寿命**（`Close` と解放後の利用拒否）でした。`Handler` に寿命は無いので `Lazy` では足りず、利用者ゼロのまま公開 API を増やすだけになるため削除しています。必要になったら、そのとき実需の形が分かった状態で足してください。
 * 生成方法は `Option` で差し替えます (`gcs.WithClient` / `s3.WithEndpoint` など)。`WithClient` で注入されたクライアントのライフサイクルは呼び出し元に残り、`Close` は閉じません（GCS は `ownsClient` で管理）。
 * **`Close` と各アクセサは並行に呼ばれても安全です** (`sync.RWMutex`)。以前はクライアントのフィールドを無同期で nil にしていました。CI は `-race` 付きですが、並行に触るテストが無く検出されていませんでした。`Close` は冪等で、以降のアクセサは `ErrClosed` を返します。

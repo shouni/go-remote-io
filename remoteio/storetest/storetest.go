@@ -263,8 +263,8 @@ func testListRecursive(t *testing.T, f Fixture) {
 	}
 }
 
-// v1 は区切り文字を指定しないと素の前方一致で、"data" が "data-archive/" にも
-// 一致していました。スキームによって意味が変わらないよう常に正規化します。
+// 正規化しないと素の前方一致になり、"data" が "data-archive/" にも一致します。
+// スキームによって意味が変わらないよう、実装は常に正規化しなければなりません。
 func testListNormalizesPrefix(t *testing.T, f Fixture) {
 	f.write(t, "data/a.txt", "a")
 	f.write(t, "data-archive/c.txt", "c")

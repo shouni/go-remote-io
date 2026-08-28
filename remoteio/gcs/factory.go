@@ -1,9 +1,11 @@
-// Package gcs は、Google Cloud Storage 向けの remoteio.IOFactory 実装を提供します。
+// Package gcs は、Google Cloud Storage 向けの remoteio.Handler と
+// そのライフサイクルを管理するファクトリを提供します。
 package gcs
 
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/option"
@@ -11,15 +13,20 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// ClientFactory は、GCS関連のI/Oコンポーネントを管理します。
+// ClientFactory は、GCS クライアントのライフサイクルを持ちます。
+//
+// Close と各アクセサは並行に呼ばれても安全です。v1 はクライアントのフィールドを
+// 無同期で nil にしていたため、Close と読み出しが競合していました
+// （CI は -race 付きですが、並行に触るテストが無く検出されていませんでした）。
 type ClientFactory struct {
+	mu     sync.RWMutex
 	client *storage.Client
 	// ownsClient は、Close でクライアントを閉じてよいかを表します。
 	// WithClient で注入されたクライアントのライフサイクルは呼び出し元にあります。
 	ownsClient bool
 }
 
-var _ remoteio.IOFactory = (*ClientFactory)(nil)
+var _ remoteio.Factory = (*ClientFactory)(nil)
 
 // settings は Option を解決した結果です。
 type settings struct {
@@ -28,10 +35,6 @@ type settings struct {
 }
 
 // Option は ClientFactory の生成方法を変える Functional Option です。
-//
-// 以前は storage.NewClient(ctx) 決め打ちだったため、エミュレータへの接続や
-// 認証情報の差し替え、生成済みクライアントの再利用ができず、
-// ファクトリを使うか自前で Router を組むかの二択になっていました。
 type Option func(*settings)
 
 // WithClient は生成済みの GCS クライアントを使います。
@@ -49,7 +52,7 @@ func WithClientOptions(opts ...option.ClientOption) Option {
 	return func(s *settings) { s.clientOpts = append(s.clientOpts, opts...) }
 }
 
-// New は ClientFactory インスタンスを作成します。
+// New は ClientFactory を作成します。
 // オプションを渡さない場合は Application Default Credentials でクライアントを生成します。
 func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
 	var cfg settings
@@ -67,59 +70,29 @@ func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GCSクライアントの初期化に失敗しました: %w", err)
 	}
-
 	return &ClientFactory{client: client, ownsClient: true}, nil
 }
 
-// Close は保持しているGCSクライアントをクローズします。
+// Close は保持している GCS クライアントを解放します。冪等です。
 // WithClient で注入されたクライアントは閉じず、参照だけを手放します。
 func (f *ClientFactory) Close() error {
-	client := f.client
+	f.mu.Lock()
+	client, owns := f.client, f.ownsClient
 	f.client = nil
-	if client == nil || !f.ownsClient {
+	f.mu.Unlock()
+
+	if client == nil || !owns {
 		return nil
 	}
 	return client.Close()
 }
 
-// --- Reader / InputReader 関連 ---
-
-// Reader は単一リソースの読み込み機能を提供します。
-func (f *ClientFactory) Reader() (remoteio.Reader, error) {
-	return f.InputReader()
-}
-
-// InputReader は読み込みと一覧取得の両方の機能を提供します。
-func (f *ClientFactory) InputReader() (remoteio.InputReader, error) {
-	return f.router()
-}
-
-// --- Writer / OutputWriter 関連 ---
-
-// Writer は単一リソースの書き込み機能を提供します。
-func (f *ClientFactory) Writer() (remoteio.Writer, error) {
-	return f.OutputWriter()
-}
-
-// OutputWriter は書き込み機能を提供します。
-func (f *ClientFactory) OutputWriter() (remoteio.OutputWriter, error) {
-	return f.router()
-}
-
-// --- その他 ---
-
-// URLSigner は署名付きURLの生成機能を提供します。
-func (f *ClientFactory) URLSigner() (remoteio.URLSigner, error) {
-	client, err := f.gcsClient()
-	if err != nil {
-		return nil, err
-	}
-	return NewURLSigner(client), nil
-}
-
-// SchemeHandler は gs:// を担当するハンドラを返します。
-// remoteio.NewMultiFactory が複数スキームを 1 つの Router に集約するために使います。
-func (f *ClientFactory) SchemeHandler() (remoteio.SchemeHandler, error) {
+// Handler は gs:// を担当するハンドラを返します。
+//
+// 複数のクラウドを 1 つの Store で扱いたい場合は、各ファクトリから取り出した
+// ハンドラを remoteio.NewStore へ並べてください。v1 の MultiFactory と
+// HandlerProvider は、そのために必要だった足場です。
+func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	client, err := f.gcsClient()
 	if err != nil {
 		return nil, err
@@ -127,21 +100,23 @@ func (f *ClientFactory) SchemeHandler() (remoteio.SchemeHandler, error) {
 	return NewHandler(client), nil
 }
 
-// router は gs:// とローカル関連のパスを扱う Router を組み立てます
+// Store は gs:// とローカル関連のパスを扱う Store を返します
 // （s3:// は登録されないため明確に未対応となります）。
-func (f *ClientFactory) router() (*remoteio.Router, error) {
-	handler, err := f.SchemeHandler()
+func (f *ClientFactory) Store() (remoteio.Store, error) {
+	handler, err := f.Handler()
 	if err != nil {
 		return nil, err
 	}
-	return remoteio.NewSchemeRouter(handler), nil
+	return remoteio.NewStore(handler), nil
 }
 
-// gcsClient は内部用のヘルパーメソッドです。
-// クライアントが存命かチェックし、生のリソースを返します。
+// gcsClient はクライアントが存命かを確かめて返します。
 func (f *ClientFactory) gcsClient() (*storage.Client, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	if f.client == nil {
-		return nil, fmt.Errorf("GCSクライアントは既にクローズされているか、初期化されていません")
+		return nil, fmt.Errorf("GCSクライアントは既にクローズされているか、初期化されていません: %w", remoteio.ErrClosed)
 	}
 	return f.client, nil
 }

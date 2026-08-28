@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -258,7 +259,7 @@ func testListRecursive(t *testing.T, f Fixture) {
 		}
 	}
 	// Name は列挙したプレフィックスからの相対名です。
-	if !slicesContains(got, "a.txt") || !slicesContains(got, "sub/b.txt") {
+	if !slices.Contains(got, "a.txt") || !slices.Contains(got, "sub/b.txt") {
 		t.Errorf("Name はプレフィックスからの相対名にしてください: got %v", got)
 	}
 }
@@ -402,13 +403,4 @@ func testRejectsEmptyObjectName(t *testing.T, f Fixture) {
 	if _, err := f.Handler.Open(context.Background(), bucketOnly); !errors.Is(err, remoteio.ErrInvalidURI) {
 		t.Errorf("オブジェクト名が空の URI が拒否されません: %v", err)
 	}
-}
-
-func slicesContains(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }

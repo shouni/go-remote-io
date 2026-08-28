@@ -82,19 +82,13 @@ func TestFactoryCloseIsRaceFree(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// クローズ前後どちらでも良く、エラーになること自体は想定内です。
 			// ここで見ているのはデータ競合が起きないことです。
 			_, _ = factory.Store()
 			_, _ = factory.Handler()
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_ = factory.Close()
-	}()
+	wg.Go(func() { _ = factory.Close() })
 	wg.Wait()
 }

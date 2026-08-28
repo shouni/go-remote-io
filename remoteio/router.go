@@ -81,14 +81,14 @@ func (r *Router) resolve(uri string) (Handler, error) {
 
 // Open は指定されたパスに対応する読み取りストリームを返します。
 func (r *Router) Open(ctx context.Context, name string) (io.ReadCloser, error) {
-	return dispatch(r, name, func(h Handler) (io.ReadCloser, error) {
+	return r.dispatch(name, func(h Handler) (io.ReadCloser, error) {
 		return h.Open(ctx, name)
 	})
 }
 
 // Stat は指定されたパスのメタデータを返します。
 func (r *Router) Stat(ctx context.Context, name string) (ObjectInfo, error) {
-	return dispatch(r, name, func(h Handler) (ObjectInfo, error) {
+	return r.dispatch(name, func(h Handler) (ObjectInfo, error) {
 		return h.Stat(ctx, name)
 	})
 }
@@ -212,7 +212,10 @@ func Sub(store Store, prefix string) Store {
 
 // dispatch は、ハンドラを解決して値を返す操作へ委譲します。
 // 解決に失敗したときの戻り値をゼロ値で揃えるためだけの補助です。
-func dispatch[T any](r *Router, uri string, fn func(Handler) (T, error)) (T, error) {
+//
+// メソッドが型パラメータを持てるため、レシーバを第 1 引数で受け取る関数にせず
+// メソッドとして書けます。
+func (r *Router) dispatch[T any](uri string, fn func(Handler) (T, error)) (T, error) {
 	handler, err := r.resolve(uri)
 	if err != nil {
 		var zero T

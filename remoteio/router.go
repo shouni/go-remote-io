@@ -108,6 +108,9 @@ func (r *Router) Exists(ctx context.Context, name string) (bool, error) {
 }
 
 // List は指定されたパス配下を列挙します。
+//
+// 何も無いプレフィックスはエラーではなく空で返り、区切り文字を渡さない場合は配下を
+// 再帰的に返します。詳しくは Store.List を参照してください。
 func (r *Router) List(ctx context.Context, name string, opts ...ListOption) iter.Seq2[Entry, error] {
 	handler, err := r.resolve(name)
 	if err != nil {

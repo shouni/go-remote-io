@@ -3,7 +3,7 @@ module github.com/shouni/go-remote-io
 go 1.27
 
 require (
-	cloud.google.com/go/storage v1.66.0
+	cloud.google.com/go/storage v1.67.0
 	github.com/aws/aws-sdk-go-v2 v1.45.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.2
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.2
@@ -13,7 +13,7 @@ require (
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/stretchr/testify v1.12.1
-	google.golang.org/api v0.296.0
+	google.golang.org/api v0.297.0
 )
 
 require (

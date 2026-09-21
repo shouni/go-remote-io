@@ -51,6 +51,10 @@ var (
 // wrapf は、番兵を保ったまま日本語の文脈を付けてエラーを包みます。
 // 呼び出し側の判定は errors.Is で、読み手向けの説明は日本語で、という切り分けを
 // 全ファイルで同じ形に保つための補助です。
+//
+// 文脈は先に整形し切ってから %s で渡します。整形済みの文字列をもう一度書式として
+// 解釈させると、オブジェクト名に % が入っただけで %w の対応がずれ、errors.Is が
+// 効かなくなります（オブジェクト名は任意のバイト列です）。
 func wrapf(err error, format string, args ...any) error {
-	return fmt.Errorf(fmt.Sprintf(format, args...)+": %w", err)
+	return fmt.Errorf("%s: %w", fmt.Sprintf(format, args...), err)
 }

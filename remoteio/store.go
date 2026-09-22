@@ -25,8 +25,11 @@ package remoteio
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"iter"
+	"strings"
 	"time"
 )
 
@@ -93,7 +96,10 @@ type Store interface {
 	//	}
 	List(ctx context.Context, name string, opts ...ListOption) iter.Seq2[Entry, error]
 
-	// Delete は対象を削除します。不在はエラーにしません（冪等）。
+	// Delete は対象のオブジェクト 1 つを削除します。不在はエラーにしません（冪等）。
+	//
+	// プレフィックスを渡しても配下は消えず、「その名前のオブジェクトは無い」として
+	// 黙って成功します。配下をまとめて消すには DeletePrefix を使ってください。
 	Delete(ctx context.Context, name string) error
 
 	// Copy は src の内容を dst へ複製します。スキームは跨げます。
@@ -147,6 +153,59 @@ func Move(ctx context.Context, s Store, src, dst string, opts ...WriteOption) er
 		return wrapf(err, "コピー元の削除に失敗しました (%s)", src)
 	}
 	return nil
+}
+
+// PrefixDeleter は DeletePrefix が要求する最小のインターフェースです。Store が満たします。
+type PrefixDeleter interface {
+	List(ctx context.Context, name string, opts ...ListOption) iter.Seq2[Entry, error]
+	Delete(ctx context.Context, name string) error
+}
+
+// DeletePrefix は prefix 配下のオブジェクトをすべて削除し、削除した件数を返します。
+//
+// Delete は単一オブジェクトを消すもので、プレフィックスを渡しても「その名前の
+// オブジェクトは無い」として黙って成功します。ディレクトリという実体が無いストレージ
+// では、消す側が一覧して 1 つずつ消すしかなく、その手順を各利用者が書くと、範囲の
+// 検査や失敗の扱いが少しずつ違う写しが増えます。
+//
+// prefix は List と同じ意味で、"data" と "data/" は同じ範囲を指し、"data-archive/" は
+// 含みません。スコープ付きストア（Store.Sub）に空文字を渡すと、そのスコープ全体が
+// 対象です。スキーム付きの URI でオブジェクト名が空のもの（バケットの根）は、範囲を
+// 限定できないので ErrInvalidURI で拒否します。
+//
+// 一覧に失敗すれば何も消さずに返します。個々の削除の失敗は集めて errors.Join で
+// 返し、残りの削除は続けます。何も無いプレフィックスは (0, nil) です。
+func DeletePrefix(ctx context.Context, s PrefixDeleter, prefix string) (deleted int, err error) {
+	if scheme := Scheme(prefix); scheme != "" {
+		if _, _, object, err := ParseURI(prefix); err != nil {
+			return 0, err
+		} else if strings.Trim(object, "/") == "" {
+			return 0, fmt.Errorf("%w: バケットの根は削除の範囲にできません (%s)", ErrInvalidURI, prefix)
+		}
+	}
+
+	// 先に集めてから消す。一覧の途中で消すと、ページングする実装で取りこぼしが起きうる。
+	var names []string
+	for entry, err := range s.List(ctx, prefix) {
+		if err != nil {
+			return 0, wrapf(err, "削除対象の一覧取得に失敗しました (%s)", prefix)
+		}
+		if entry.IsPrefix {
+			continue
+		}
+		// Entry.URI ではなく Name を使う。URI はスコープ付きストアでは ErrAbsoluteName になる。
+		names = append(names, Join(prefix, entry.Name))
+	}
+
+	var errs []error
+	for _, name := range names {
+		if err := s.Delete(ctx, name); err != nil {
+			errs = append(errs, wrapf(err, "%s の削除に失敗しました", name))
+			continue
+		}
+		deleted++
+	}
+	return deleted, errors.Join(errs...)
 }
 
 // Factory は、ストレージクライアントのライフサイクルを持ち、そこから Store と

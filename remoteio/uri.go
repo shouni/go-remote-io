@@ -45,16 +45,6 @@ func HasScheme(uri, scheme string) bool {
 	return Scheme(uri) == scheme
 }
 
-// IsRemote は uri が gs:// または s3:// を指しているかどうかを返します。
-func IsRemote(uri string) bool {
-	switch Scheme(uri) {
-	case SchemeGCS, SchemeS3:
-		return true
-	default:
-		return false
-	}
-}
-
 // BuildURI は、スキーム名・バケット名・オブジェクトパスから URI を組み立てます。
 // scheme は区切りを含まない名前 ("gs") で渡します。
 func BuildURI(scheme, bucket, object string) string {

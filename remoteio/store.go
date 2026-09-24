@@ -143,18 +143,6 @@ func WriteAll(ctx context.Context, w Writer, name string, data []byte, opts ...W
 	return w.Write(ctx, name, bytes.NewReader(data), opts...)
 }
 
-// Move は Copy のあとにコピー元を削除します。
-// コピーが成功した場合にのみ削除するため、途中で失敗してもコピー元は残ります。
-func Move(ctx context.Context, s Store, src, dst string, opts ...WriteOption) error {
-	if err := s.Copy(ctx, src, dst, opts...); err != nil {
-		return err
-	}
-	if err := s.Delete(ctx, src); err != nil {
-		return wrapf(err, "コピー元の削除に失敗しました (%s)", src)
-	}
-	return nil
-}
-
 // PrefixDeleter は DeletePrefix が要求する最小のインターフェースです。Store が満たします。
 type PrefixDeleter interface {
 	List(ctx context.Context, name string, opts ...ListOption) iter.Seq2[Entry, error]

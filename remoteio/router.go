@@ -8,6 +8,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -141,6 +142,14 @@ func (r *Router) Delete(ctx context.Context, name string) error {
 //
 // 両者が同じハンドラに解決され、そのハンドラが Copier を実装していれば
 // サーバーサイドコピーへ落とします。それ以外はストリームで中継します。
+//
+// WriteOption を渡した場合は、必ずストリーム中継になります。CopyTo は
+// オプションを受け取らないので、サーバーサイドコピーへ落とすと指定が黙って
+// 消えるためです（WithIfNotExists を付けたのに上書きされる、など）。
+//
+// どちらの経路でも、コピー元の Content-Type とユーザー定義メタデータは引き継ぎます。
+// サーバーサイドコピーは元の属性を保つのに、ストリーム中継だけが既定の Content-Type で
+// 書き直すと、同じ Copy がスキームの組み合わせで別の結果になります。
 func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption) error {
 	srcHandler, err := r.resolve(src)
 	if err != nil {
@@ -153,7 +162,7 @@ func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption)
 
 	// 同一スキームかどうかで判定します。ハンドラ値そのものの比較は、
 	// 比較不可能な型を内包していると panic するため使いません。
-	if srcHandler.Scheme() == dstHandler.Scheme() {
+	if len(opts) == 0 && srcHandler.Scheme() == dstHandler.Scheme() {
 		if copier, ok := srcHandler.(Copier); ok {
 			err := copier.CopyTo(ctx, src, dst)
 			// ErrNotSupported だけはストリーム中継へ落とします。サーバーサイド
@@ -169,16 +178,47 @@ func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption)
 		}
 	}
 
+	writeOpts := newWriteOptions(opts...)
+	carrySourceAttributes(ctx, srcHandler, src, &writeOpts)
+
 	rc, err := srcHandler.Open(ctx, src)
 	if err != nil {
 		return wrapf(err, "コピー元のオープンに失敗しました (%s)", src)
 	}
 	defer func() { _ = rc.Close() }()
 
-	if err := dstHandler.Write(ctx, dst, rc, newWriteOptions(opts...)); err != nil {
+	if err := dstHandler.Write(ctx, dst, rc, writeOpts); err != nil {
 		return wrapf(err, "コピー先への書き込みに失敗しました (%s -> %s)", src, dst)
 	}
 	return nil
+}
+
+// carrySourceAttributes は、呼び出し側が指定しなかった Content-Type とメタデータを
+// コピー元から引き継ぎます。
+//
+// Stat の 1 往復が増えますが、これが無いとストリーム中継のコピーは元の Content-Type を
+// 既定値で塗り潰します（画像を複製したら text/plain になる）。Stat に失敗した場合は
+// 引き継ぎを諦めるだけで、コピー自体は続けます。属性の欠落でコピーを失敗させるのは、
+// 呼び出し側の依頼に対して過剰だからです。
+func carrySourceAttributes(ctx context.Context, h Handler, src string, o *WriteOptions) {
+	// 呼び出し側が明示したかどうかは、オプション無しの既定値と比べて判断します。
+	defaults := newWriteOptions()
+	needType := o.ContentType == defaults.ContentType
+	needMeta := len(o.Metadata) == 0
+	if !needType && !needMeta {
+		return
+	}
+
+	info, err := h.Stat(ctx, src)
+	if err != nil {
+		return
+	}
+	if needType && info.ContentType != "" {
+		o.ContentType = info.ContentType
+	}
+	if needMeta && len(info.Metadata) > 0 {
+		o.Metadata = maps.Clone(info.Metadata)
+	}
 }
 
 // SignURL は署名付き URL を生成します。
@@ -255,7 +295,25 @@ func (s *scopedStore) resolveName(name string) (string, error) {
 	if Scheme(name) != "" {
 		return "", fmt.Errorf("%w: %s (スコープ: %s)", ErrAbsoluteName, name, s.prefix)
 	}
+	if hasRelativeSegment(name) {
+		return "", fmt.Errorf("%w: 相対セグメントを含む名前です: %s (スコープ: %s)", ErrInvalidURI, name, s.prefix)
+	}
 	return Join(s.prefix, name), nil
+}
+
+// hasRelativeSegment は、名前に "." または ".." のセグメントが含まれるかを返します。
+//
+// ローカルの Join は filepath.Join なので ".." を畳んでスコープの外を指せます
+// （ErrAbsoluteName が防ごうとしている「別の場所へ書ける」がそのまま起きます）。
+// リモートではスコープを抜けませんが、gs://b/jobs/../x.txt というリテラルのキーが
+// でき、同じ呼び出しがスキームによって別の意味になります。両方まとめて拒否します。
+func hasRelativeSegment(name string) bool {
+	for segment := range strings.SplitSeq(strings.ReplaceAll(name, `\`, "/"), "/") {
+		if segment == "." || segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *scopedStore) Open(ctx context.Context, name string) (io.ReadCloser, error) {

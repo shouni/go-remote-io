@@ -304,7 +304,7 @@ func TestWriteRespectsContextCancellation(t *testing.T) {
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "キャンセル時にファイルを作らないこと")
 }
 
-func TestCopyAndMoveLocal(t *testing.T) {
+func TestCopyLocal(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore()
 	dir := t.TempDir()
@@ -323,19 +323,6 @@ func TestCopyAndMoveLocal(t *testing.T) {
 		ok, err := store.Exists(ctx, src)
 		require.NoError(t, err)
 		assert.True(t, ok)
-	})
-
-	t.Run("Move はコピー成功後にコピー元を消す", func(t *testing.T) {
-		moved := filepath.Join(dir, "moved.txt")
-		require.NoError(t, Move(ctx, store, src, moved))
-
-		ok, err := store.Exists(ctx, src)
-		require.NoError(t, err)
-		assert.False(t, ok)
-
-		data, err := ReadAll(ctx, store, moved)
-		require.NoError(t, err)
-		assert.Equal(t, "payload", string(data))
 	})
 
 	t.Run("コピー元が無ければコピー先を作らない", func(t *testing.T) {

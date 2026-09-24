@@ -53,7 +53,6 @@ HTML は本文だけを抽出します。項目ごとの対照表は
   フェイクは要りません。
 * **接続先の差し替え** — MinIO や Cloudflare R2 のような S3 互換ストレージ、生成済みクライアントの
   再利用に対応します。
-* **`io/fs` との相互運用** — `remoteio.FS(ctx, store)` で読み取り専用の `fs.FS` として渡せます。
 
 インターフェースの定義、番兵エラー、書き込み・一覧のオプション、`gcs` / `s3` の接続オプションは
 [pkg.go.dev](https://pkg.go.dev/github.com/shouni/go-remote-io/remoteio) にあります。

@@ -13,7 +13,7 @@ require (
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/stretchr/testify v1.12.1
-	google.golang.org/api v0.302.0
+	google.golang.org/api v0.304.0
 )
 
 require (

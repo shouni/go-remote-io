@@ -26,7 +26,7 @@ Go Remote IO は、**Google Cloud Storage**・**Amazon S3**・**ローカルフ�
 担当している工程が違います。**go-remote-io は成果物の置き場**で、読み書き両方に加えて署名付き URL と
 一覧を持ち、ローカルも扱います。**go-web-reader は素材の取得元**で、`https://` を含む読み取り専用、
 HTML は本文だけを抽出します。項目ごとの対照表は
-[go-web-reader の README](https://github.com/shouni/go-web-reader#go-remote-io-との線引き) にあります
+[go-web-reader の README](https://github.com/shouni/go-web-reader/blob/main/README.ja.md#go-remote-io-との線引き) にあります
 （両方に置くと必ず片方が古くなるため、後発の側に 1 つだけ置いています）。
 
 ---

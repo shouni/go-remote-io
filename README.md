@@ -28,7 +28,7 @@ it serves a different stage. **go-remote-io is where artifacts are kept**: it re
 signed URLs and listings, and handles local files too. **go-web-reader is where source material comes
 from**: read-only, including `https://`, and it extracts only the main text from HTML. The
 item-by-item comparison is in
-[go-web-reader's README](https://github.com/shouni/go-web-reader#go-remote-io-との線引き)
+[go-web-reader's README](https://github.com/shouni/go-web-reader#where-go-remote-io-ends-and-this-library-begins)
 (it lives only in the later of the two, because keeping it in both would always leave one stale).
 
 ---

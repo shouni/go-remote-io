@@ -8,8 +8,8 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/storetest"
 )
 
-// memio が本物と同じ契約を満たすことが、このパッケージの存在意義そのものです。
-// フェイクと本物がずれるなら、フェイクを使うテストは何も確かめていません。
+// That memio meets the same contract as the real thing is the very reason this package exists.
+// If the fake drifts from the real thing, tests using the fake verify nothing.
 func TestConformance(t *testing.T) {
 	storetest.TestHandler(t, func(_ *testing.T) storetest.Fixture {
 		return storetest.Fixture{

@@ -30,8 +30,8 @@ func TestScheme(t *testing.T) {
 	}
 }
 
-// 素の前方一致だと "gsfoo://" のような別スキームまで拾ってしまいます。
-// 判定を HasScheme に集約している理由がこれです。
+// A bare prefix match would also catch another scheme such as "gsfoo://".
+// That is why the check is gathered in HasScheme.
 func TestHasSchemeRejectsPrefixCollision(t *testing.T) {
 	assert.True(t, HasScheme("gs://bucket/key", SchemeGCS))
 	assert.False(t, HasScheme("gsfoo://bucket/key", SchemeGCS))
@@ -66,13 +66,13 @@ func TestParseURI(t *testing.T) {
 }
 
 func TestParseObjectURIRequiresObject(t *testing.T) {
-	// gs://bucket のような URI を通すと、バケット操作と取り違えたときに
-	// 「不在」なのか「URI が不正」なのか区別できなくなります。
+	// Letting a URI such as gs://bucket through makes it impossible, when it is mistaken
+	// for a bucket operation, to tell "not there" from "invalid URI".
 	_, _, err := ParseObjectURI(SchemeGCS, "gs://bucket")
 	assert.ErrorIs(t, err, ErrInvalidURI)
 
 	_, _, err = ParseObjectURI(SchemeGCS, "s3://bucket/key")
-	assert.ErrorIs(t, err, ErrInvalidURI, "担当外のスキームは拒否する")
+	assert.ErrorIs(t, err, ErrInvalidURI, "a foreign scheme is rejected")
 
 	bucket, object, err := ParseObjectURI(SchemeGCS, "gs://bucket/key")
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestBuildURIRoundTrip(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 
 			if tt.object != "" {
-				// URL としてエンコードしないことが、キーを取り違えないための条件です。
+				// Not encoding as a URL is the condition for not mistaking the key.
 				_, bucket, object, err := ParseURI(got)
 				require.NoError(t, err)
 				assert.Equal(t, tt.bucket, bucket)
@@ -108,8 +108,8 @@ func TestBuildURIRoundTrip(t *testing.T) {
 	}
 }
 
-// 区切り文字を指定したときだけ正規化する形だと、"data" が "data-archive/" にも
-// 一致します。常に正規化するのはそれを防ぐためです。
+// Normalizing only when a delimiter is given would make "data" also match
+// "data-archive/". Always normalizing prevents that.
 func TestListPrefixAlwaysNormalizes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -125,7 +125,7 @@ func TestListPrefixAlwaysNormalizes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, ListPrefix(tt.uri))
-			assert.Equal(t, tt.want, ListPrefix(ListPrefix(tt.uri)), "冪等であること")
+			assert.Equal(t, tt.want, ListPrefix(ListPrefix(tt.uri)), "idempotent")
 		})
 	}
 }
@@ -139,7 +139,7 @@ func TestDir(t *testing.T) {
 	})
 
 	t.Run("空白や ? を含むキーを壊さない", func(t *testing.T) {
-		// net/url を通すとここが %20 やクエリ区切りに化けます。
+		// Through net/url this would turn into %20 or a query separator.
 		assert.Equal(t, "gs://b/a b/", Dir("gs://b/a b/x y.txt"))
 		assert.Equal(t, "gs://b/a?b/", Dir("gs://b/a?b/x.txt"))
 	})

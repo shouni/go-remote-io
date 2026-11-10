@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// collect は反復子を読み切って Entry を集めます。
+// collect reads the iterator to the end and gathers the Entry values.
 func collect(t *testing.T, seq iter.Seq2[Entry, error]) []Entry {
 	t.Helper()
 	var out []Entry
@@ -26,7 +26,7 @@ func collect(t *testing.T, seq iter.Seq2[Entry, error]) []Entry {
 	return out
 }
 
-// firstErr は反復子から最初のエラーを取り出します。
+// firstErr takes the first error from the iterator.
 func firstErr(t *testing.T, seq iter.Seq2[Entry, error]) error {
 	t.Helper()
 	for _, err := range seq {
@@ -37,7 +37,7 @@ func firstErr(t *testing.T, seq iter.Seq2[Entry, error]) error {
 	return nil
 }
 
-// names は Entry の Name を並べます。
+// names lists the Name of each Entry.
 func names(entries []Entry) []string {
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -53,11 +53,11 @@ func TestRouterResolve(t *testing.T) {
 	t.Run("未登録スキームは ErrUnsupportedScheme", func(t *testing.T) {
 		_, err := store.Open(ctx, "gs://bucket/key")
 		assert.ErrorIs(t, err, ErrUnsupportedScheme)
-		assert.Contains(t, err.Error(), "gs", "どのスキームだったかがメッセージに残ること")
+		assert.Contains(t, err.Error(), "gs", "the message keeps which scheme it was")
 	})
 
 	t.Run("ローカルとfileは既定で登録される", func(t *testing.T) {
-		assert.Equal(t, []string{SchemeFile}, store.Schemes(), "フォールバックは Schemes に含めない")
+		assert.Equal(t, []string{SchemeFile}, store.Schemes(), "the fallback is not included in Schemes")
 
 		dir := t.TempDir()
 		path := filepath.Join(dir, "a.txt")
@@ -79,8 +79,8 @@ func TestRouterResolve(t *testing.T) {
 	})
 }
 
-// Exists の意味をスキーム間で揃えたことの確認です。
-// ローカルだけディレクトリに true を返すと、同じ呼び出しがスキームで別の意味になります。
+// Checks that the meaning of Exists is aligned across schemes.
+// If local alone returned true for a directory, the same call would mean different things per scheme.
 func TestExistsIsAboutObjectsOnly(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore()
@@ -104,7 +104,7 @@ func TestExistsIsAboutObjectsOnly(t *testing.T) {
 	t.Run("ディレクトリは false", func(t *testing.T) {
 		ok, err := store.Exists(ctx, filepath.Join(dir, "sub"))
 		require.NoError(t, err)
-		assert.False(t, ok, "リモートにディレクトリという実体は無いので揃える")
+		assert.False(t, ok, "remote storage has no directory entity, so local matches it")
 	})
 
 	t.Run("Stat もディレクトリには ErrNotExist", func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestSubScoping(t *testing.T) {
 	t.Run("相対名がスコープ内へ解決される", func(t *testing.T) {
 		require.NoError(t, WriteAll(ctx, jobs, "j1/status.json", []byte(`{"state":"queued"}`)))
 
-		// ルートのストアから絶対パスで読めることで、結合が意図どおりか分かります。
+		// Reading from the root store by absolute path shows whether the join is as intended.
 		data, err := ReadAll(ctx, store, filepath.Join(dir, "jobs", "j1", "status.json"))
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"state":"queued"}`, string(data))
@@ -137,7 +137,7 @@ func TestSubScoping(t *testing.T) {
 	})
 
 	t.Run("絶対URIは ErrAbsoluteName で拒否する", func(t *testing.T) {
-		// スコープを絞ったつもりのコードが別のバケットへ書けてしまうのを防ぎます。
+		// Keeps code that thinks it narrowed its scope from writing to another bucket.
 		err := WriteAll(ctx, jobs, "gs://other-bucket/x.json", []byte("{}"))
 		assert.ErrorIs(t, err, ErrAbsoluteName)
 
@@ -156,7 +156,7 @@ func TestSubScoping(t *testing.T) {
 			if !entry.IsPrefix {
 				continue
 			}
-			// 疑似ディレクトリ名から、そのまま次のスコープを作れます。
+			// The next scope can be made straight from the pseudo-directory name.
 			sub := jobs.Sub(strings.TrimSuffix(entry.Name, "/"))
 			if ok, _ := sub.Exists(ctx, "status.json"); ok {
 				found = true
@@ -187,7 +187,7 @@ func TestListLocal(t *testing.T) {
 
 		for _, e := range entries {
 			if e.Name == "sub/" {
-				assert.True(t, e.IsPrefix, "呼び出し側が末尾を見て判定しなくて済むこと")
+				assert.True(t, e.IsPrefix, "the caller need not decide by the trailing character")
 			} else {
 				assert.False(t, e.IsPrefix)
 				assert.Equal(t, int64(1), e.Size)
@@ -203,12 +203,12 @@ func TestListLocal(t *testing.T) {
 		}
 	})
 
-	// 区切り文字を指定しないとき素の前方一致にすると、
-	// "data" が "data-archive/" まで拾っていました。
+	// With a bare prefix match when no delimiter was given,
+	// "data" also picked up "data-archive/".
 	t.Run("プレフィックスは常に正規化される", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "data")))
 		for _, e := range entries {
-			assert.NotContains(t, e.URI, "data-archive", "隣接する名前を拾わないこと")
+			assert.NotContains(t, e.URI, "data-archive", "adjacent names are not picked up")
 		}
 	})
 
@@ -222,26 +222,26 @@ func TestListLocal(t *testing.T) {
 		assert.Equal(t, 1, seen)
 	})
 
-	// リモートに「存在しないプレフィックス」という状態は無いため、
-	// ローカルだけエラーにすると同じ呼び出しがスキームによって別の意味になります。
-	// 契約は storetest の「何も無いプレフィックスの一覧は空でエラーにしない」です。
+	// Remote storage has no state such as "a prefix that does not exist", so making it
+	// an error for local alone would make the same call mean different things per scheme.
+	// The contract is storetest's "listing a prefix with nothing under it returns empty, not an error".
 	t.Run("不在ディレクトリは空の一覧", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "missing")))
 		assert.Empty(t, entries)
 	})
 }
 
-// failingReader は途中まで読めたあとに失敗するリーダーです。
+// failingReader is a reader that fails after part of it has been read.
 type failingReader struct{ r io.Reader }
 
 func (f *failingReader) Read(p []byte) (int, error) {
 	if n, _ := f.r.Read(p); n > 0 {
 		return n, nil
 	}
-	return 0, errors.New("読み取り失敗")
+	return 0, errors.New("read failed")
 }
 
-// 「成功しなければ書き込み先は変化しない」という Handler の契約の確認です。
+// Checks the Handler contract that "the destination does not change unless the write succeeds".
 func TestWriteIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore()
@@ -255,13 +255,13 @@ func TestWriteIsAtomic(t *testing.T) {
 
 	data, readErr := os.ReadFile(path)
 	require.NoError(t, readErr)
-	assert.Equal(t, "original", string(data), "失敗した書き込みが既存の内容を壊してはいけない")
+	assert.Equal(t, "original", string(data), "a failed write must not break the existing contents")
 
 	t.Run("一時ファイルを残さない", func(t *testing.T) {
 		entries, err := os.ReadDir(dir)
 		require.NoError(t, err)
 		for _, e := range entries {
-			assert.NotContains(t, e.Name(), ".tmp-", "失敗経路でも後始末される")
+			assert.NotContains(t, e.Name(), ".tmp-", "cleaned up on the failure path too")
 		}
 	})
 
@@ -286,7 +286,7 @@ func TestWriteIfNotExists(t *testing.T) {
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Equal(t, "first", string(data), "既存の内容が保たれること")
+	assert.Equal(t, "first", string(data), "the existing contents are kept")
 }
 
 func TestWriteRespectsContextCancellation(t *testing.T) {
@@ -301,7 +301,7 @@ func TestWriteRespectsContextCancellation(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 
 	_, statErr := os.Stat(path)
-	assert.ErrorIs(t, statErr, os.ErrNotExist, "キャンセル時にファイルを作らないこと")
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "no file is created on cancellation")
 }
 
 func TestCopyLocal(t *testing.T) {
@@ -342,10 +342,10 @@ func TestDeleteIsIdempotent(t *testing.T) {
 
 	require.NoError(t, WriteAll(ctx, store, path, []byte("x")))
 	require.NoError(t, store.Delete(ctx, path))
-	assert.NoError(t, store.Delete(ctx, path), "不在の削除はエラーにしない")
+	assert.NoError(t, store.Delete(ctx, path), "deleting a missing object is not an error")
 }
 
-// 署名器を持たないハンドラへ要求したときは ErrNotSupported で返します。
+// A request to a handler without a signer returns ErrNotSupported.
 func TestSignURLUnsupportedForLocal(t *testing.T) {
 	store := NewStore()
 	_, err := store.SignURL(context.Background(), filepath.Join(t.TempDir(), "a.txt"), "GET", time.Minute)
@@ -375,7 +375,7 @@ func TestFileHandlerRoundTrip(t *testing.T) {
 	t.Run("List は file:// の URI を返す", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, "file://"+filepath.ToSlash(dir)))
 		require.Len(t, entries, 1)
-		assert.True(t, strings.HasPrefix(entries[0].URI, "file://"), "次の呼び出しへそのまま渡せる形であること")
+		assert.True(t, strings.HasPrefix(entries[0].URI, "file://"), "in a form that can be passed as is to the next call")
 	})
 
 	t.Run("パーセントエンコードをデコードする", func(t *testing.T) {
@@ -393,8 +393,8 @@ func TestFileHandlerRoundTrip(t *testing.T) {
 	})
 }
 
-// decoratingStore は Store を包んで Open の回数を数えるだけの型です。
-// Sub をライブラリの Sub へ委譲しているのが要点です。
+// decoratingStore is a type that only wraps a Store and counts Open calls.
+// The point is that it delegates Sub to the library's Sub.
 type decoratingStore struct {
 	Store
 	opens int
@@ -405,9 +405,9 @@ func (d *decoratingStore) Open(ctx context.Context, name string) (io.ReadCloser,
 	return d.Store.Open(ctx, name)
 }
 
-// Sub は、スコープを絞ったあとも包んだ振る舞いを保ちます。
-// 埋め込みから昇格した Sub をそのまま使うと、土台が埋め込まれた側になり
-// ここでの記録が失われます。
+// Sub keeps the wrapping behaviour even after narrowing the scope.
+// Using the Sub promoted from the embedded field as is would make the embedded value
+// the base, and the recording here would be lost.
 func (d *decoratingStore) Sub(prefix string) Store { return Sub(d, prefix) }
 
 func TestSubKeepsDecoratedBehaviour(t *testing.T) {
@@ -422,7 +422,7 @@ func TestSubKeepsDecoratedBehaviour(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "x", string(data))
 
-	assert.Equal(t, 1, dec.opens, "スコープ越しの Open も包んだ側を通ること")
+	assert.Equal(t, 1, dec.opens, "Open through the scope also goes through the wrapper")
 
 	t.Run("入れ子の Sub でも保たれる", func(t *testing.T) {
 		nested := jobs.Sub(".")

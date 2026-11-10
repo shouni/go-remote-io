@@ -1,8 +1,8 @@
-// Package storetest は、remoteio.Handler の実装が契約を満たしているかを検査する
-// 適合性テストスイートを提供します。
+// Package storetest provides a conformance test suite that checks whether a
+// remoteio.Handler implementation meets its contract.
 //
-// 使い方は testing/fstest の TestFS と同じ発想です。GCS / S3 / ローカル /
-// memio / 第三者の実装が、すべて同じ 1 本のスイートを通ります。
+// It follows the same idea as TestFS in testing/fstest. GCS, S3, local, memio and
+// third-party implementations all go through the same single suite.
 //
 //	func TestConformance(t *testing.T) {
 //		storetest.TestHandler(t, func(t *testing.T) storetest.Fixture {
@@ -10,10 +10,10 @@
 //		})
 //	}
 //
-// これが無いと、フェイクと本物がずれても CI は緑のままになります。実際
-// 「区切り文字なしの一覧がスキームによって別の意味になる」「ローカルだけ
-// ディレクトリを Exists で true にする」といった食い違いが、長いあいだ
-// テストの外にありました。
+// Without it, CI stays green even when a fake and the real thing drift apart. In fact,
+// mismatches such as "a listing without a delimiter means different things per scheme"
+// and "only local makes Exists true for a directory" stayed outside the tests for a
+// long time.
 package storetest
 
 import (
@@ -28,38 +28,38 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// Fixture は、スイートが 1 つの Handler を試すために必要な足場です。
+// Fixture is the scaffolding the suite needs to exercise one Handler.
 type Fixture struct {
-	// Handler は検査対象です。
+	// Handler is what is being checked.
 	Handler remoteio.Handler
 
-	// Root は、スイートが自由に読み書きしてよい場所です。
-	// リモートなら "gs://bucket/conformance"、ローカルなら t.TempDir() の値を渡します。
-	// スイートはこの下にしか触りません。
+	// Root is a place the suite may freely read and write.
+	// Pass "gs://bucket/conformance" for remote storage, or a t.TempDir() value for local.
+	// The suite touches nothing outside it.
 	Root string
 
-	// SupportsContentType は、Content-Type を保存して Stat で返せるかどうかです。
-	// ローカルファイルシステムは保持できないため false になります。
+	// SupportsContentType reports whether Content-Type can be stored and returned by Stat.
+	// The local file system cannot keep it, so it is false there.
 	SupportsContentType bool
 
-	// SupportsMetadata は、ユーザー定義メタデータを保存して Stat で返せるかどうかです。
+	// SupportsMetadata reports whether user-defined metadata can be stored and returned by Stat.
 	SupportsMetadata bool
 
-	// SupportsIfNotExists は、条件付き書き込みに対応しているかどうかです。
-	// フェイクが条件付きリクエストを解釈しない場合は false にしてください
-	// （本物との差なので、黙って通すのではなく宣言します）。
+	// SupportsIfNotExists reports whether conditional writes are supported.
+	// Set it to false when a fake does not interpret conditional requests
+	// (it is a difference from the real thing, so declare it rather than letting it pass silently).
 	SupportsIfNotExists bool
 
-	// BucketScoped は、URI が「スキーム + バケット + キー」の形かどうかです。
-	// gs:// / s3:// は true、file:// はスキームを持ちますがバケットの概念が無いため
-	// false です。「オブジェクト名が空の URI を拒否する」検査の対象を分けます。
+	// BucketScoped reports whether URIs have the form "scheme + bucket + key".
+	// gs:// / s3:// are true; file:// has a scheme but no notion of a bucket, so it is
+	// false. It selects what the "reject URIs with an empty object name" check applies to.
 	BucketScoped bool
 }
 
-// TestHandler は Handler の契約を検査します。
+// TestHandler checks the Handler contract.
 //
-// newFixture はサブテストごとに呼ばれます。1 つのサブテストが書いたものが
-// 次のサブテストへ漏れないよう、毎回まっさらな足場を返してください。
+// newFixture is called for each subtest. Return fresh scaffolding every time, so that
+// what one subtest wrote does not leak into the next.
 func TestHandler(t *testing.T, newFixture func(t *testing.T) Fixture) {
 	t.Helper()
 
@@ -86,44 +86,44 @@ func TestHandler(t *testing.T, newFixture func(t *testing.T) Fixture) {
 	run("オブジェクト名が空の URI を拒否する", testRejectsEmptyObjectName)
 }
 
-// uri は Root からの相対名を、ハンドラが受け取る形へ組み立てます。
+// uri builds a name relative to Root into the form the handler receives.
 func (f Fixture) uri(name string) string { return remoteio.Join(f.Root, name) }
 
-// write は前提を組み立てるための書き込みです。
+// write is a write for setting up preconditions.
 func (f Fixture) write(t *testing.T, name, content string) string {
 	t.Helper()
 	full := f.uri(name)
 	err := f.Handler.Write(context.Background(), full, strings.NewReader(content),
 		remoteio.WriteOptions{ContentType: remoteio.DefaultContentType})
 	if err != nil {
-		t.Fatalf("前提の書き込みに失敗しました (%s): %v", full, err)
+		t.Fatalf("precondition write failed (%s): %v", full, err)
 	}
 	return full
 }
 
-// read はハンドラから内容を読み切ります。
+// read reads the whole contents from the handler.
 func (f Fixture) read(t *testing.T, uri string) string {
 	t.Helper()
 	rc, err := f.Handler.Open(context.Background(), uri)
 	if err != nil {
-		t.Fatalf("Open に失敗しました (%s): %v", uri, err)
+		t.Fatalf("Open failed (%s): %v", uri, err)
 	}
 	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		t.Fatalf("読み込みに失敗しました (%s): %v", uri, err)
+		t.Fatalf("read failed (%s): %v", uri, err)
 	}
 	return string(data)
 }
 
-// collect は一覧を読み切ります。
+// collect reads the whole listing.
 func (f Fixture) collect(t *testing.T, uri string, opts remoteio.ListOptions) []remoteio.Entry {
 	t.Helper()
 	var out []remoteio.Entry
 	for entry, err := range f.Handler.List(context.Background(), uri, opts) {
 		if err != nil {
-			t.Fatalf("List に失敗しました (%s): %v", uri, err)
+			t.Fatalf("List failed (%s): %v", uri, err)
 		}
 		out = append(out, entry)
 	}
@@ -140,31 +140,31 @@ func names(entries []remoteio.Entry) []string {
 
 func testSchemeIsStable(t *testing.T, f Fixture) {
 	if got, want := f.Handler.Scheme(), f.Handler.Scheme(); got != want {
-		t.Fatalf("Scheme() が呼ぶたびに変わります: %q と %q", got, want)
+		t.Fatalf("Scheme() changes between calls: %q and %q", got, want)
 	}
 	if strings.Contains(f.Handler.Scheme(), "://") {
-		t.Errorf("Scheme() は区切りを含まない名前を返してください: %q", f.Handler.Scheme())
+		t.Errorf("Scheme() must return a name without the separator: %q", f.Handler.Scheme())
 	}
 }
 
-// 呼び出し側がスキームに依らず errors.Is で不在を判定できることが、
-// この抽象が成立するための条件です。
+// That callers can detect absence with errors.Is whatever the scheme is the
+// condition for this abstraction to work.
 func testNotExist(t *testing.T, f Fixture) {
 	ctx := context.Background()
 	missing := f.uri("missing.txt")
 
 	if _, err := f.Handler.Open(ctx, missing); !errors.Is(err, remoteio.ErrNotExist) {
-		t.Errorf("Open の不在エラーが ErrNotExist を含みません: %v", err)
+		t.Errorf("Open's not-exist error does not contain ErrNotExist: %v", err)
 	}
 	if _, err := f.Handler.Stat(ctx, missing); !errors.Is(err, remoteio.ErrNotExist) {
-		t.Errorf("Stat の不在エラーが ErrNotExist を含みません: %v", err)
+		t.Errorf("Stat's not-exist error does not contain ErrNotExist: %v", err)
 	}
 }
 
 func testWriteReadRoundTrip(t *testing.T, f Fixture) {
 	uri := f.write(t, "round/trip.txt", "hello")
 	if got := f.read(t, uri); got != "hello" {
-		t.Errorf("読み戻した内容が違います: got %q, want %q", got, "hello")
+		t.Errorf("contents read back differ: got %q, want %q", got, "hello")
 	}
 }
 
@@ -174,24 +174,24 @@ func testStatMetadata(t *testing.T, f Fixture) {
 
 	opts := remoteio.WriteOptions{ContentType: "application/json", Metadata: map[string]string{"job-id": "j1"}}
 	if err := f.Handler.Write(ctx, uri, strings.NewReader(`{"a":1}`), opts); err != nil {
-		t.Fatalf("Write に失敗しました: %v", err)
+		t.Fatalf("Write failed: %v", err)
 	}
 
 	info, err := f.Handler.Stat(ctx, uri)
 	if err != nil {
-		t.Fatalf("Stat に失敗しました: %v", err)
+		t.Fatalf("Stat failed: %v", err)
 	}
 	if info.URI != uri {
-		t.Errorf("ObjectInfo.URI は問い合わせに使った URI を返してください: got %q, want %q", info.URI, uri)
+		t.Errorf("ObjectInfo.URI must return the URI used for the query: got %q, want %q", info.URI, uri)
 	}
 	if info.Size != int64(len(`{"a":1}`)) {
-		t.Errorf("Size が違います: got %d, want %d", info.Size, len(`{"a":1}`))
+		t.Errorf("Size differs: got %d, want %d", info.Size, len(`{"a":1}`))
 	}
 	if f.SupportsContentType && info.ContentType != "application/json" {
-		t.Errorf("ContentType が保存されていません: got %q", info.ContentType)
+		t.Errorf("ContentType was not stored: got %q", info.ContentType)
 	}
 	if f.SupportsMetadata && info.Metadata["job-id"] != "j1" {
-		t.Errorf("Metadata が保存されていません: got %v", info.Metadata)
+		t.Errorf("Metadata was not stored: got %v", info.Metadata)
 	}
 }
 
@@ -200,18 +200,18 @@ func testDeleteIsIdempotent(t *testing.T, f Fixture) {
 	uri := f.write(t, "delete-me.txt", "x")
 
 	if err := f.Handler.Delete(ctx, uri); err != nil {
-		t.Fatalf("Delete に失敗しました: %v", err)
+		t.Fatalf("Delete failed: %v", err)
 	}
 	if err := f.Handler.Delete(ctx, uri); err != nil {
-		t.Errorf("不在の Delete はエラーにしないでください: %v", err)
+		t.Errorf("Delete of a missing object must not be an error: %v", err)
 	}
 	if _, err := f.Handler.Stat(ctx, uri); !errors.Is(err, remoteio.ErrNotExist) {
-		t.Errorf("削除後の Stat が ErrNotExist を返しません: %v", err)
+		t.Errorf("Stat after delete does not return ErrNotExist: %v", err)
 	}
 }
 
-// 疑似ディレクトリが IsPrefix として渡ることを確かめます。
-// これが文字列に潰れていると、呼び出し側が末尾の区切り文字を見て判定し直す形に戻ります。
+// Checks that pseudo-directories arrive as IsPrefix.
+// If this were flattened into strings, callers would be back to re-deciding by the trailing delimiter.
 func testListShallow(t *testing.T, f Fixture) {
 	f.write(t, "data/a.txt", "a")
 	f.write(t, "data/sub/b.txt", "b")
@@ -219,7 +219,7 @@ func testListShallow(t *testing.T, f Fixture) {
 	entries := f.collect(t, f.uri("data"), remoteio.ListOptions{Delimiter: "/"})
 	got := names(entries)
 	if len(got) != 2 {
-		t.Fatalf("直下は 2 件のはずです: got %v", got)
+		t.Fatalf("there should be 2 direct children: got %v", got)
 	}
 
 	var sawFile, sawPrefix bool
@@ -228,19 +228,19 @@ func testListShallow(t *testing.T, f Fixture) {
 		case "a.txt":
 			sawFile = true
 			if e.IsPrefix {
-				t.Errorf("オブジェクトが IsPrefix になっています: %+v", e)
+				t.Errorf("an object is marked IsPrefix: %+v", e)
 			}
 		case "sub/":
 			sawPrefix = true
 			if !e.IsPrefix {
-				t.Errorf("疑似ディレクトリが IsPrefix になっていません: %+v", e)
+				t.Errorf("a pseudo-directory is not marked IsPrefix: %+v", e)
 			}
 		default:
-			t.Errorf("想定外の Entry: %+v", e)
+			t.Errorf("unexpected Entry: %+v", e)
 		}
 	}
 	if !sawFile || !sawPrefix {
-		t.Errorf("直下のオブジェクトと疑似ディレクトリの両方が要ります: got %v", got)
+		t.Errorf("both the direct child object and the pseudo-directory are required: got %v", got)
 	}
 }
 
@@ -251,21 +251,21 @@ func testListRecursive(t *testing.T, f Fixture) {
 	entries := f.collect(t, f.uri("data"), remoteio.ListOptions{})
 	got := names(entries)
 	if len(got) != 2 {
-		t.Fatalf("配下を再帰的に返してください: got %v", got)
+		t.Fatalf("everything below must be returned recursively: got %v", got)
 	}
 	for _, e := range entries {
 		if e.IsPrefix {
-			t.Errorf("区切り文字なしの一覧に疑似ディレクトリが混ざっています: %+v", e)
+			t.Errorf("a listing without a delimiter contains a pseudo-directory: %+v", e)
 		}
 	}
-	// Name は列挙したプレフィックスからの相対名です。
+	// Name is relative to the listed prefix.
 	if !slices.Contains(got, "a.txt") || !slices.Contains(got, "sub/b.txt") {
-		t.Errorf("Name はプレフィックスからの相対名にしてください: got %v", got)
+		t.Errorf("Name must be relative to the prefix: got %v", got)
 	}
 }
 
-// 正規化しないと素の前方一致になり、"data" が "data-archive/" にも一致します。
-// スキームによって意味が変わらないよう、実装は常に正規化しなければなりません。
+// Without normalization it is a bare prefix match, and "data" also matches "data-archive/".
+// Implementations must always normalize, so the meaning does not change per scheme.
 func testListNormalizesPrefix(t *testing.T, f Fixture) {
 	f.write(t, "data/a.txt", "a")
 	f.write(t, "data-archive/c.txt", "c")
@@ -273,20 +273,20 @@ func testListNormalizesPrefix(t *testing.T, f Fixture) {
 	for _, opts := range []remoteio.ListOptions{{}, {Delimiter: "/"}} {
 		for _, e := range f.collect(t, f.uri("data"), opts) {
 			if strings.Contains(e.URI, "data-archive") {
-				t.Errorf("隣接する名前を拾っています (delimiter=%q): %+v", opts.Delimiter, e)
+				t.Errorf("an adjacent name was picked up (delimiter=%q): %+v", opts.Delimiter, e)
 			}
 		}
 	}
 }
 
-// リモートに「存在しないプレフィックス」という状態はありません。
-// ローカルだけエラーにすると、同じ呼び出しがスキームによって別の意味になります。
+// Remote storage has no state such as "a prefix that does not exist".
+// Making it an error for local alone would make the same call mean different things per scheme.
 func testListEmptyPrefix(t *testing.T, f Fixture) {
 	for entry, err := range f.Handler.List(context.Background(), f.uri("nothing-here"), remoteio.ListOptions{}) {
 		if err != nil {
-			t.Fatalf("何も無いプレフィックスの一覧はエラーにしないでください: %v", err)
+			t.Fatalf("listing a prefix with nothing under it must not be an error: %v", err)
 		}
-		t.Errorf("何も無いはずのプレフィックスから Entry が返りました: %+v", entry)
+		t.Errorf("an Entry came back from a prefix that should be empty: %+v", entry)
 	}
 }
 
@@ -298,40 +298,40 @@ func testListStops(t *testing.T, f Fixture) {
 	var seen int
 	for _, err := range f.Handler.List(context.Background(), f.uri("data"), remoteio.ListOptions{}) {
 		if err != nil {
-			t.Fatalf("List に失敗しました: %v", err)
+			t.Fatalf("List failed: %v", err)
 		}
 		seen++
 		break
 	}
 	if seen != 1 {
-		t.Errorf("break で打ち切れていません: %d 件処理されました", seen)
+		t.Errorf("break did not stop the listing: %d entries were processed", seen)
 	}
 }
 
-// Entry.URI はルートの Store へそのまま渡せる完全な形でなければなりません。
+// Entry.URI must be complete, so it can be passed as is to the root Store.
 func testEntryURIIsUsable(t *testing.T, f Fixture) {
 	f.write(t, "data/a.txt", "payload")
 
 	entries := f.collect(t, f.uri("data"), remoteio.ListOptions{})
 	if len(entries) == 0 {
-		t.Fatal("一覧が空です")
+		t.Fatal("the listing is empty")
 	}
 	if got := f.read(t, entries[0].URI); got != "payload" {
-		t.Errorf("Entry.URI から読めた内容が違います: got %q", got)
+		t.Errorf("contents read via Entry.URI differ: got %q", got)
 	}
 }
 
-// failingReader は途中まで読めたあとに失敗するリーダーです。
+// failingReader is a reader that fails after part of it has been read.
 type failingReader struct{ r io.Reader }
 
 func (f *failingReader) Read(p []byte) (int, error) {
 	if n, _ := f.r.Read(p); n > 0 {
 		return n, nil
 	}
-	return 0, errors.New("storetest: 読み取り失敗")
+	return 0, errors.New("storetest: read failed")
 }
 
-// 「成功しなければ書き込み先が変化しない」という契約の検査です。
+// Checks the contract that "the destination does not change unless the write succeeds".
 func testWriteIsAtomic(t *testing.T, f Fixture) {
 	ctx := context.Background()
 
@@ -339,10 +339,10 @@ func testWriteIsAtomic(t *testing.T, f Fixture) {
 		uri := f.uri("atomic/new.txt")
 		src := &failingReader{r: bytes.NewReader([]byte("partial-data"))}
 		if err := f.Handler.Write(ctx, uri, src, remoteio.WriteOptions{}); err == nil {
-			t.Fatal("失敗するはずの書き込みが成功しました")
+			t.Fatal("a write that should fail succeeded")
 		}
 		if _, err := f.Handler.Stat(ctx, uri); !errors.Is(err, remoteio.ErrNotExist) {
-			t.Errorf("失敗した書き込みでオブジェクトが残りました: %v", err)
+			t.Errorf("a failed write left an object behind: %v", err)
 		}
 	})
 
@@ -350,57 +350,57 @@ func testWriteIsAtomic(t *testing.T, f Fixture) {
 		uri := f.write(t, "atomic/existing.txt", "original")
 		src := &failingReader{r: bytes.NewReader([]byte("partial-data"))}
 		if err := f.Handler.Write(ctx, uri, src, remoteio.WriteOptions{}); err == nil {
-			t.Fatal("失敗するはずの書き込みが成功しました")
+			t.Fatal("a write that should fail succeeded")
 		}
 		if got := f.read(t, uri); got != "original" {
-			t.Errorf("失敗した上書きが既存の内容を壊しました: got %q", got)
+			t.Errorf("a failed overwrite broke the existing contents: got %q", got)
 		}
 	})
 }
 
 func testWriteIfNotExists(t *testing.T, f Fixture) {
 	if !f.SupportsIfNotExists {
-		t.Skip("この実装は条件付き書き込みに対応していません")
+		t.Skip("this implementation does not support conditional writes")
 	}
 	ctx := context.Background()
 	uri := f.uri("once.txt")
 
 	opts := remoteio.WriteOptions{ContentType: remoteio.DefaultContentType, IfNotExists: true}
 	if err := f.Handler.Write(ctx, uri, strings.NewReader("first"), opts); err != nil {
-		t.Fatalf("初回の書き込みに失敗しました: %v", err)
+		t.Fatalf("first write failed: %v", err)
 	}
 	if err := f.Handler.Write(ctx, uri, strings.NewReader("second"), opts); !errors.Is(err, remoteio.ErrExist) {
-		t.Fatalf("既存への条件付き書き込みが ErrExist を返しません: %v", err)
+		t.Fatalf("a conditional write over an existing object does not return ErrExist: %v", err)
 	}
 	if got := f.read(t, uri); got != "first" {
-		t.Errorf("既存の内容が壊れました: got %q", got)
+		t.Errorf("the existing contents were broken: got %q", got)
 	}
 }
 
-// ハンドラは公開されているため、Router を通さずに直接呼ばれる余地があります。
-// 担当外のスキームを黙って処理すると、別のクラウドのバケットを触ります。
+// Handlers are exported, so they can be called directly without going through Router.
+// Silently processing a foreign scheme would touch a bucket on another cloud.
 func testRejectsForeignScheme(t *testing.T, f Fixture) {
 	if f.Handler.Scheme() == "" {
-		t.Skip("フォールバックのハンドラはスキームを持ちません")
+		t.Skip("the fallback handler has no scheme")
 	}
 	foreign := "definitely-not-" + f.Handler.Scheme() + "://bucket/key"
 	if _, err := f.Handler.Open(context.Background(), foreign); !errors.Is(err, remoteio.ErrInvalidURI) {
-		t.Errorf("担当外のスキームが ErrInvalidURI で拒否されません: %v", err)
+		t.Errorf("a foreign scheme is not rejected with ErrInvalidURI: %v", err)
 	}
 }
 
-// バケット操作と取り違えたり、不在なのか URI 不正なのか区別できなくなるのを防ぎます。
+// Prevents confusing it with a bucket operation, and being unable to tell "not there" from "invalid URI".
 func testRejectsEmptyObjectName(t *testing.T, f Fixture) {
 	if !f.BucketScoped {
-		t.Skip("この実装にバケットの概念はありません")
+		t.Skip("this implementation has no notion of a bucket")
 	}
 	_, bucket, _, err := remoteio.ParseURI(f.Root)
 	if err != nil {
-		t.Fatalf("Fixture.Root が URI として解釈できません (%s): %v", f.Root, err)
+		t.Fatalf("Fixture.Root cannot be parsed as a URI (%s): %v", f.Root, err)
 	}
 
 	bucketOnly := remoteio.BuildURI(f.Handler.Scheme(), bucket, "")
 	if _, err := f.Handler.Open(context.Background(), bucketOnly); !errors.Is(err, remoteio.ErrInvalidURI) {
-		t.Errorf("オブジェクト名が空の URI が拒否されません: %v", err)
+		t.Errorf("a URI with an empty object name is not rejected: %v", err)
 	}
 }

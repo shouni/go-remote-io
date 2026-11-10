@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDeletePrefixRemote は、絶対 URI を渡すルートストアと、そこから絞ったスコープ付き
-// ストアの両方で、リモートスキームの一括削除が効くことを確かめます。Entry.URI を使うと
-// スコープ付きでは ErrAbsoluteName になり、Name を使うとルートでは相対名になるため、
-// Join(prefix, Name) がどちらでも正しいことがここの要点です。
+// TestDeletePrefixRemote checks that bulk deletion on a remote scheme works both on the
+// root store, given absolute URIs, and on a scoped store narrowed from it. Using
+// Entry.URI is ErrAbsoluteName on the scoped store, and using Name is a relative name on
+// the root, so the point here is that Join(prefix, Name) is right for both.
 func TestDeletePrefixRemote(t *testing.T) {
 	t.Parallel()
 

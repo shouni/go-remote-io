@@ -9,24 +9,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestWrapfKeepsSentinelForNamesWithPercent は、名前に % が入っても番兵が保たれることを
-// 検証します。整形済みの文脈を書式として再解釈すると %w の対応がずれ、errors.Is が
-// 効かなくなります。
+// TestWrapfKeepsSentinelForNamesWithPercent checks that the sentinel survives a name
+// containing %. Reinterpreting already formatted context as a format shifts the %w
+// pairing, and errors.Is stops working.
 func TestWrapfKeepsSentinelForNamesWithPercent(t *testing.T) {
 	t.Parallel()
 
 	for _, name := range []string{"missing-100%.txt", "a%20b.txt", "%w.txt", "%!s.txt"} {
 		t.Run(name, func(t *testing.T) {
-			err := wrapf(ErrNotExist, "%s を開けません", name)
+			err := wrapf(ErrNotExist, "%s cannot be opened", name)
 
 			require.ErrorIs(t, err, ErrNotExist)
-			assert.Equal(t, name+" を開けません: "+ErrNotExist.Error(), err.Error())
+			assert.Equal(t, name+" cannot be opened: "+ErrNotExist.Error(), err.Error())
 		})
 	}
 }
 
-// TestMissingObjectWithPercentInName は、% を含む名前の不在が「無い」として扱われることを
-// 利用者から見える形で確かめます。
+// TestMissingObjectWithPercentInName checks, as consumers see it, that a missing name
+// containing % is treated as "not there".
 func TestMissingObjectWithPercentInName(t *testing.T) {
 	t.Parallel()
 
@@ -45,9 +45,9 @@ func TestMissingObjectWithPercentInName(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotExist)
 }
 
-// TestDeletePrefix は、プレフィックス配下の一括削除が「一覧して 1 つずつ消す」を
-// 正しく行うことを検証します。Delete にプレフィックスを渡しても黙って成功するため、
-// この補助が無いと各利用者が同じ手順を書き、範囲の検査や失敗の扱いがずれていきます。
+// TestDeletePrefix checks that bulk deletion under a prefix correctly does "list, then
+// delete one by one". Delete given a prefix silently succeeds, so without this helper
+// every consumer writes the same procedure, and range checks and failure handling drift.
 func TestDeletePrefix(t *testing.T) {
 	t.Parallel()
 
@@ -94,9 +94,9 @@ func TestDeletePrefix(t *testing.T) {
 
 		ok, err := jobs.Exists(ctx, "j2/b.txt")
 		require.NoError(t, err)
-		assert.True(t, ok, "隣のジョブまで消えています")
+		assert.True(t, ok, "the neighbouring job was deleted too")
 
-		// 空文字はスコープ全体。
+		// The empty string is the whole scope.
 		deleted, err = DeletePrefix(ctx, jobs, "")
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleted)

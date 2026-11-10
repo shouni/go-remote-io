@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCopyHonoursWriteOptions は、WriteOption が同一スキームのコピーでも効くことを
-// 検証します。CopyTo はオプションを受け取らないため、サーバーサイドコピーへ落とすと
-// 指定が黙って消えます（WithIfNotExists を付けたのに上書きされる、など）。
+// TestCopyHonoursWriteOptions checks that a WriteOption takes effect even for a copy
+// within one scheme. CopyTo takes no options, so falling through to a server-side copy
+// would silently drop them (WithIfNotExists given, yet the target is overwritten, and so on).
 func TestCopyHonoursWriteOptions(t *testing.T) {
 	t.Parallel()
 
@@ -22,15 +22,15 @@ func TestCopyHonoursWriteOptions(t *testing.T) {
 	require.NoError(t, remoteio.WriteAll(ctx, store, "gs://b/src.txt", []byte("new")))
 	require.NoError(t, remoteio.WriteAll(ctx, store, "gs://b/dst.txt", []byte("existing")))
 
-	// 同一スキームでも WithIfNotExists は効く（既存を上書きしない）。
+	// Even within one scheme, WithIfNotExists takes effect (the existing object is not overwritten).
 	err := store.Copy(ctx, "gs://b/src.txt", "gs://b/dst.txt", remoteio.WithIfNotExists())
 	require.ErrorIs(t, err, remoteio.ErrExist)
 
 	got, err := remoteio.ReadAll(ctx, store, "gs://b/dst.txt")
 	require.NoError(t, err)
-	assert.Equal(t, "existing", string(got), "拒否したはずのコピーが上書きしています")
+	assert.Equal(t, "existing", string(got), "a copy that should have been refused overwrote the target")
 
-	// 指定した Content-Type も効く。
+	// The given Content-Type takes effect too.
 	require.NoError(t, store.Copy(ctx, "gs://b/src.txt", "gs://b/typed.txt",
 		remoteio.WithContentType("application/json")))
 	info, err := store.Stat(ctx, "gs://b/typed.txt")
@@ -38,9 +38,9 @@ func TestCopyHonoursWriteOptions(t *testing.T) {
 	assert.Equal(t, "application/json", info.ContentType)
 }
 
-// TestCopyCarriesSourceAttributes は、指定しなかった Content-Type とメタデータを
-// コピー元から引き継ぐことを検証します。引き継がないと、ストリーム中継の経路だけが
-// 既定の Content-Type で塗り潰し、同じ Copy がスキームの組み合わせで別の結果になります。
+// TestCopyCarriesSourceAttributes checks that the Content-Type and metadata not specified
+// are carried over from the source. Otherwise only the stream relay path paints over them
+// with the default Content-Type, and the same Copy gives different results per scheme pair.
 func TestCopyCarriesSourceAttributes(t *testing.T) {
 	t.Parallel()
 
@@ -63,7 +63,7 @@ func TestCopyCarriesSourceAttributes(t *testing.T) {
 		assert.Equal(t, "job-1", info.Metadata["origin"], dst)
 	}
 
-	// 明示した Content-Type は引き継ぎに勝つ。
+	// An explicit Content-Type wins over the carried-over one.
 	require.NoError(t, store.Copy(ctx, "gs://b/src.png", "s3://b/typed.bin",
 		remoteio.WithContentType("application/octet-stream")))
 	info, err := store.Stat(ctx, "s3://b/typed.bin")
@@ -71,9 +71,9 @@ func TestCopyCarriesSourceAttributes(t *testing.T) {
 	assert.Equal(t, "application/octet-stream", info.ContentType)
 }
 
-// TestSubRejectsRelativeSegments は、スコープ付きストアが ".." を含む名前を拒むことを
-// 検証します。ローカルの Join は filepath.Join なので、通すとスコープの外を読み書きできます
-// （ErrAbsoluteName が防いでいるのと同じ「別の場所へ書ける」）。
+// TestSubRejectsRelativeSegments checks that a scoped store rejects names containing "..".
+// The local Join is filepath.Join, so letting them through would read and write outside
+// the scope (the same "can write somewhere else" that ErrAbsoluteName prevents).
 func TestSubRejectsRelativeSegments(t *testing.T) {
 	t.Parallel()
 
@@ -96,12 +96,12 @@ func TestSubRejectsRelativeSegments(t *testing.T) {
 		assert.ErrorIs(t, err, remoteio.ErrInvalidURI, "remote WriteAll(%q)", name)
 	}
 
-	// スコープ外へ書けていないこと。
+	// Nothing was written outside the scope.
 	got, err := remoteio.ReadAll(ctx, store, filepath.Join(dir, "secret.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "secret", string(got))
 
-	// 普通の名前は通る（"..", "." を含まないドット始まりも含む）。
+	// Ordinary names pass (including names starting with a dot that are not "..", ".").
 	require.NoError(t, remoteio.WriteAll(ctx, local, "a/b.txt", []byte("ok")))
 	require.NoError(t, remoteio.WriteAll(ctx, local, ".hidden", []byte("ok")))
 }

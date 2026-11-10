@@ -18,7 +18,7 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/storetest"
 )
 
-// 本物の S3 ハンドラを、memio やローカルと同じ 1 本のスイートに通します。
+// Runs the real S3 handler through the same single suite as memio and local.
 func TestConformance(t *testing.T) {
 	storetest.TestHandler(t, func(t *testing.T) storetest.Fixture {
 		backend := s3mem.New()

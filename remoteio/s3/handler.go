@@ -19,22 +19,22 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// Scheme は、このパッケージが担当するスキーム名です（区切りは含みません）。
+// Scheme is the scheme name this package is responsible for (without the separator).
 const Scheme = remoteio.SchemeS3
 
-// Handler は Amazon S3 を扱う remoteio.Handler です。
+// Handler is the remoteio.Handler for Amazon S3.
 //
-// サーバーサイドコピー (remoteio.Copier) と署名付き URL (remoteio.Signer) の
-// 任意インターフェースも実装します。
+// It also implements the optional interfaces for server-side copy (remoteio.Copier)
+// and signed URLs (remoteio.Signer).
 type Handler struct {
 	client *awss3.Client
-	// transfer は非 Seeker のストリームとマルチパートを扱うためのものです。
+	// transfer handles non-Seeker streams and multipart uploads.
 	//
-	// 旧 feature/s3/manager の Uploader / Downloader は非推奨で、
-	// feature/s3/transfermanager が後継です（aws-sdk-go-v2 discussion #3306）。
-	// 後継はまだ v0.x で API が動く可能性がありますが、このエコシステムで
-	// s3:// を使っているのは 1 箇所だけなので、追随の costs より
-	// 非推奨 API を抱えない方を採ります。
+	// The Uploader / Downloader in the old feature/s3/manager are deprecated, and
+	// feature/s3/transfermanager is the successor (aws-sdk-go-v2 discussion #3306).
+	// The successor is still v0.x and its API may move, but only one place in this
+	// ecosystem uses s3://, so not carrying a deprecated API is preferred over the
+	// cost of keeping up.
 	transfer *transfermanager.Client
 }
 
@@ -44,7 +44,7 @@ var (
 	_ remoteio.Signer  = (*Handler)(nil)
 )
 
-// NewHandler は S3 クライアントを包んだハンドラを返します。
+// NewHandler returns a handler wrapping an S3 client.
 func NewHandler(client *awss3.Client) *Handler {
 	h := &Handler{client: client}
 	if client != nil {
@@ -53,11 +53,11 @@ func NewHandler(client *awss3.Client) *Handler {
 	return h
 }
 
-// Scheme は "s3" を返します。
+// Scheme returns "s3".
 func (h *Handler) Scheme() string { return Scheme }
 
-// Open は S3 オブジェクトの読み取りストリームを返します。
-// オブジェクトが存在しない場合のエラーは remoteio.ErrNotExist を含みます。
+// Open returns a read stream for an S3 object.
+// When the object does not exist, the error contains remoteio.ErrNotExist.
 func (h *Handler) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 	bucket, key, err := h.parseObjectURI(uri)
 	if err != nil {
@@ -72,13 +72,13 @@ func (h *Handler) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 		if isNotFound(err) {
 			return nil, notExist(uri)
 		}
-		return nil, fmt.Errorf("S3読み込み失敗 (URI: %s): %w", uri, err)
+		return nil, fmt.Errorf("S3 read failed (URI: %s): %w", uri, err)
 	}
 	return result.Body, nil
 }
 
-// Stat は S3 オブジェクトのメタデータを返します。
-// 見つからない場合のエラーは Open と同じく remoteio.ErrNotExist を含みます。
+// Stat returns the metadata of an S3 object.
+// When it is not found, the error contains remoteio.ErrNotExist, as with Open.
 func (h *Handler) Stat(ctx context.Context, uri string) (remoteio.ObjectInfo, error) {
 	bucket, key, err := h.parseObjectURI(uri)
 	if err != nil {
@@ -93,7 +93,7 @@ func (h *Handler) Stat(ctx context.Context, uri string) (remoteio.ObjectInfo, er
 		if isNotFound(err) {
 			return remoteio.ObjectInfo{}, notExist(uri)
 		}
-		return remoteio.ObjectInfo{}, fmt.Errorf("S3属性取得失敗 (URI: %s): %w", uri, err)
+		return remoteio.ObjectInfo{}, fmt.Errorf("S3 attrs failed (URI: %s): %w", uri, err)
 	}
 
 	return remoteio.ObjectInfo{
@@ -105,10 +105,10 @@ func (h *Handler) Stat(ctx context.Context, uri string) (remoteio.ObjectInfo, er
 	}, nil
 }
 
-// List はプレフィックス配下のオブジェクトを列挙します。
+// List enumerates the objects under the prefix.
 func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOptions) iter.Seq2[remoteio.Entry, error] {
-	// Router は正規化済みの URI を渡しますが、ハンドラは公開されているため
-	// 直接呼ばれる余地があります。冪等なのでここでも通します。
+	// Router passes a normalized URI, but handlers are exported and can be called
+	// directly. Normalization is idempotent, so it is applied here as well.
 	uri = remoteio.ListPrefix(uri)
 
 	bucket, prefix, err := h.parseBucketURI(uri)
@@ -129,12 +129,12 @@ func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOption
 		for paginator.HasMorePages() {
 			output, err := paginator.NextPage(ctx)
 			if err != nil {
-				yield(remoteio.Entry{}, fmt.Errorf("S3リスト取得失敗 (ページネーション中, URI: %s): %w", uri, err))
+				yield(remoteio.Entry{}, fmt.Errorf("S3 list failed (during pagination, URI: %s): %w", uri, err))
 				return
 			}
 
-			// 区切り文字を指定したとき、疑似ディレクトリは Contents ではなく
-			// CommonPrefixes に入ります。
+			// With a delimiter, pseudo-directories are in CommonPrefixes rather than
+			// Contents.
 			for _, cp := range output.CommonPrefixes {
 				key := aws.ToString(cp.Prefix)
 				if key == "" || key == prefix {
@@ -169,21 +169,21 @@ func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOption
 	}
 }
 
-// Write は S3 オブジェクトへ書き込みます。
+// Write writes to an S3 object.
 //
-// PutObject ではなく transfermanager を通します。PutObject はボディが
-// io.Seeker でないと署名前のチェックサム計算に失敗し、TLS でないエンドポイント
-// （MinIO や R2、テストのフェイク）では書き込みが一切できませんでした。
-// transfermanager は非 Seeker のストリームを扱え、大きなオブジェクトを
-// マルチパートに分割し、途中で失敗したときはアップロードを abort するため、
-// 「成功しなければ書き込み先が変化しない」という Handler の契約も満たします。
+// It goes through transfermanager rather than PutObject. PutObject failed to compute
+// the pre-signing checksum unless the body was an io.Seeker, so against non-TLS
+// endpoints (MinIO, R2, test fakes) nothing could be written at all.
+// transfermanager handles non-Seeker streams, splits large objects into multipart
+// uploads, and aborts the upload when it fails part-way, so it also meets the Handler
+// contract that "the destination does not change unless the write succeeds".
 func (h *Handler) Write(ctx context.Context, uri string, src io.Reader, opts remoteio.WriteOptions) error {
 	bucket, key, err := h.parseObjectURI(uri)
 	if err != nil {
 		return err
 	}
 
-	slog.DebugContext(ctx, "S3書き込み処理開始",
+	slog.DebugContext(ctx, "S3 write started",
 		slog.String("uri", uri),
 		slog.String("content_type", opts.ContentType),
 		slog.String("disposition", opts.ContentDisposition),
@@ -206,23 +206,23 @@ func (h *Handler) Write(ctx context.Context, uri string, src io.Reader, opts rem
 		input.Metadata = opts.Metadata
 	}
 	if opts.IfNotExists {
-		// 存在確認と書き込みの間に他のプロセスが割り込めないよう、判定を
-		// ストレージ側の条件付きリクエストに委ねます。
+		// Leave the decision to the storage-side conditional request, so no other process
+		// can slip in between the existence check and the write.
 		input.IfNoneMatch = aws.String("*")
 	}
 
 	if _, err := h.transfer.UploadObject(ctx, input); err != nil {
 		if opts.IfNotExists && isPreconditionFailed(err) {
-			return fmt.Errorf("S3オブジェクトは既に存在します (URI: %s): %w", uri, remoteio.ErrExist)
+			return fmt.Errorf("S3 object already exists (URI: %s): %w", uri, remoteio.ErrExist)
 		}
-		return fmt.Errorf("S3へのコンテンツ書き込み中にエラーが発生しました (URI: %s): %w", uri, err)
+		return fmt.Errorf("write content to S3 (URI: %s): %w", uri, err)
 	}
 
-	slog.DebugContext(ctx, "S3書き込み処理完了", slog.String("uri", uri))
+	slog.DebugContext(ctx, "S3 write finished", slog.String("uri", uri))
 	return nil
 }
 
-// Delete は S3 オブジェクトを削除します。不在はエラーにしません（S3 の DeleteObject 自体が冪等です）。
+// Delete removes an S3 object. Absence is not an error (S3's DeleteObject is itself idempotent).
 func (h *Handler) Delete(ctx context.Context, uri string) error {
 	bucket, key, err := h.parseObjectURI(uri)
 	if err != nil {
@@ -232,13 +232,13 @@ func (h *Handler) Delete(ctx context.Context, uri string) error {
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	}); err != nil {
-		return fmt.Errorf("S3オブジェクトの削除に失敗しました (URI: %s): %w", uri, err)
+		return fmt.Errorf("delete S3 object (URI: %s): %w", uri, err)
 	}
 	return nil
 }
 
-// CopyTo は S3 のサーバーサイドコピーでオブジェクトを複製します。
-// remoteio.Copier の実装です。
+// CopyTo duplicates an object with an S3 server-side copy.
+// It implements remoteio.Copier.
 func (h *Handler) CopyTo(ctx context.Context, src, dst string) error {
 	srcBucket, srcKey, err := h.parseObjectURI(src)
 	if err != nil {
@@ -257,45 +257,45 @@ func (h *Handler) CopyTo(ctx context.Context, src, dst string) error {
 		if isNotFound(err) {
 			return notExist(src)
 		}
-		return fmt.Errorf("S3サーバーサイドコピーに失敗しました (%s -> %s): %w", src, dst, err)
+		return fmt.Errorf("S3 server-side copy (%s -> %s): %w", src, dst, err)
 	}
 	return nil
 }
 
-// copySource は CopySource ヘッダーに載せる "bucket/key" を組み立てます。
+// copySource builds the "bucket/key" carried in the CopySource header.
 //
-// キーは URL エンコードが要りますが、区切りの "/" はそのまま残す必要があります。
-// url.PathEscape は "/" まで %2F にしてしまうため、URL の Path として組んでから
-// EscapedPath を取ります。
+// The key needs URL encoding, but the "/" separators must stay as they are.
+// url.PathEscape turns "/" into %2F as well, so it is built as a URL Path and
+// EscapedPath is taken.
 func copySource(bucket, key string) string {
 	u := url.URL{Path: "/" + bucket + "/" + key}
 	return strings.TrimPrefix(u.EscapedPath(), "/")
 }
 
-// parseBucketURI は URI を検証してバケット名とプレフィックスに分解します
-// （オブジェクト名は空でも可）。一覧のようにプレフィックスが空でも意味を持つ操作で使います。
+// parseBucketURI validates the URI and splits it into a bucket name and a prefix
+// (the object name may be empty). Used for operations where an empty prefix is meaningful, such as listings.
 func (h *Handler) parseBucketURI(uri string) (bucket, prefix string, err error) {
 	if h.client == nil {
-		return "", "", fmt.Errorf("S3クライアントが未初期化です (URI: %s): %w", uri, remoteio.ErrClosed)
+		return "", "", fmt.Errorf("S3 client is not initialized (URI: %s): %w", uri, remoteio.ErrClosed)
 	}
 	return remoteio.ParseBucketURI(Scheme, uri)
 }
 
-// parseObjectURI は URI を検証してバケット名とオブジェクト名に分解します。
+// parseObjectURI validates the URI and splits it into a bucket name and an object name.
 func (h *Handler) parseObjectURI(uri string) (bucket, key string, err error) {
 	if h.client == nil {
-		return "", "", fmt.Errorf("S3クライアントが未初期化です (URI: %s): %w", uri, remoteio.ErrClosed)
+		return "", "", fmt.Errorf("S3 client is not initialized (URI: %s): %w", uri, remoteio.ErrClosed)
 	}
 	return remoteio.ParseObjectURI(Scheme, uri)
 }
 
-// notExist は「見つからない」を remoteio.ErrNotExist を含む形で返します。
+// notExist returns "not found" in a form that contains remoteio.ErrNotExist.
 func notExist(uri string) error {
-	return fmt.Errorf("S3オブジェクトが見つかりません (URI: %s): %w", uri, remoteio.ErrNotExist)
+	return fmt.Errorf("S3 object not found (URI: %s): %w", uri, remoteio.ErrNotExist)
 }
 
-// isNotFound は、オブジェクトが存在しないことを表すエラーかどうかを判定します。
-// HeadObject は NoSuchKey ではなく NotFound を返すため、両方を見ます。
+// isNotFound reports whether the error means the object does not exist.
+// HeadObject returns NotFound rather than NoSuchKey, so both are checked.
 func isNotFound(err error) bool {
 	if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
 		return true
@@ -304,7 +304,7 @@ func isNotFound(err error) bool {
 	return ok
 }
 
-// isPreconditionFailed は、If-None-Match の条件が満たされなかった応答かを判定します。
+// isPreconditionFailed reports whether the response is a failed If-None-Match condition.
 func isPreconditionFailed(err error) bool {
 	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		return apiErr.ErrorCode() == "PreconditionFailed"
@@ -312,7 +312,7 @@ func isPreconditionFailed(err error) bool {
 	return false
 }
 
-// errSeq は、反復を始める前に失敗したことを 1 度だけ伝える反復子を返します。
+// errSeq returns an iterator that reports, once, a failure before iteration started.
 func errSeq(err error) iter.Seq2[remoteio.Entry, error] {
 	return func(yield func(remoteio.Entry, error) bool) { yield(remoteio.Entry{}, err) }
 }

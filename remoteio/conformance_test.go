@@ -8,8 +8,8 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/storetest"
 )
 
-// ローカルファイルシステムは Content-Type もメタデータも保持しません。
-// 対応していないことを宣言した上で、それ以外の契約は同じように満たします。
+// The local file system keeps neither Content-Type nor metadata.
+// Having declared that, it meets the rest of the contract in the same way.
 func TestLocalHandlerConformance(t *testing.T) {
 	storetest.TestHandler(t, func(t *testing.T) storetest.Fixture {
 		return storetest.Fixture{
@@ -20,8 +20,8 @@ func TestLocalHandlerConformance(t *testing.T) {
 	})
 }
 
-// file:// はローカルへ読み替えるだけですが、URI の組み立てと読み替えが
-// 往復で崩れていないかは別途確かめる価値があります。
+// file:// only maps to local paths, but it is still worth checking separately that
+// building and mapping the URI survives the round trip.
 func TestFileHandlerConformance(t *testing.T) {
 	storetest.TestHandler(t, func(t *testing.T) storetest.Fixture {
 		return storetest.Fixture{

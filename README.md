@@ -8,78 +8,85 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/go-remote-io.svg)](https://pkg.go.dev/github.com/shouni/go-remote-io)
 
-## 🚀 概要 (About) - GCS・S3・ローカルを 1 つの Store で読み書きする。何を置くかは呼び出し側
+English | [日本語](README.ja.md)
 
-Go Remote IO は、**Google Cloud Storage**・**Amazon S3**・**ローカルファイルシステム**を単一の
-インターフェースで扱う I/O ライブラリです。`gs://` / `s3://` / `file://` / ローカルパスのいずれでも
-`Open(ctx, name)` 一本で読め、書き込み・一覧・存在確認・削除・コピー・署名付き URL も同じ窓口から
-呼べます。
+## 🚀 About - read and write GCS, S3 and local files through one Store; what goes there is the caller's call
 
-引き受けるのは**保存先の違いを吸収すること**だけです。オブジェクトの命名規則も、何を成果物として
-置くかも、資格情報の用意も呼び出し側に残ります。取り出したバイト列の解釈も持ちません。
+Go Remote IO is an I/O library that handles **Google Cloud Storage**, **Amazon S3** and the **local
+file system** behind a single interface. Whether the name is `gs://`, `s3://`, `file://` or a local
+path, one `Open(ctx, name)` reads it, and writing, listing, existence checks, deletion, copying and
+signed URLs are all called through the same entry point.
 
-### go-web-reader との線引き
+The only thing it takes on is **absorbing the differences between storage backends**. Object naming,
+what to store as an artifact and preparing credentials all stay with the caller. It does not
+interpret the bytes it hands back either.
 
-姉妹ライブラリの [go-web-reader](https://github.com/shouni/go-web-reader) も `gs://` を読みますが、
-担当している工程が違います。**go-remote-io は成果物の置き場**で、読み書き両方に加えて署名付き URL と
-一覧を持ち、ローカルも扱います。**go-web-reader は素材の取得元**で、`https://` を含む読み取り専用、
-HTML は本文だけを抽出します。項目ごとの対照表は
-[go-web-reader の README](https://github.com/shouni/go-web-reader#go-remote-io-との線引き) にあります
-（両方に置くと必ず片方が古くなるため、後発の側に 1 つだけ置いています）。
+### Where go-web-reader draws the line
 
----
-
-## ✨ 提供機能 (Features)
-
-* **スキームに応じた振り分け** — `gs://` / `s3://` / `file://` / それ以外はローカル、を見て登録済みの
-  ハンドラへ委譲します。**対応スキームは構築時に決まり**、登録されていないスキームは
-  `ErrUnsupportedScheme` で明確に拒否されます。設定漏れと非対応を取り違えません。
-* **1 つの窓口 (`Store`)** — 読み書き・一覧・存在確認・メタデータ・削除・コピー・署名付き URL を
-  1 つのインターフェースが持ちます。依存を絞りたい関数は `Reader`（`Open` だけ）や
-  `Writer`（`Write` だけ）を受け取れます。
-* **スコープ付きストア (`Sub`)** — プレフィックスに固定したストアを作れます。呼び出しのたびに
-  バケット名を連れ回す必要がなくなります。
-* **原子的な書き込み** — 成功しなければ書き込み先は変化しません。ローカルは一時ファイル + `rename`、
-  GCS はアップロードの中断、S3 はマルチパートの abort で実現しています。条件付き書き込み
-  (`WithIfNotExists`) も使えます。
-* **型のついた一覧** — `List` は `iter.Seq2[Entry, error]` を返し、疑似ディレクトリは `Entry.IsPrefix`
-  で分かります。`break` でそのまま打ち切れます。
-* **サーバーサイドコピー** — `Store.Copy` は、同じスキーム内でハンドラが対応していればサーバー側の
-  コピーへ落とし、そうでなければストリームで中継します。呼び出し側に分岐は要りません。
-* **スキームに依らないエラー** — 「見つからない」は必ず `ErrNotExist`（`io/fs` と同じ値）を包んで
-  返るため、保存先を問わず `errors.Is` 一本で判定できます。
-* **クラウド SDK 非依存のコア** — `remoteio` パッケージ自体は GCS / AWS の SDK を import しません。
-* **テスト用のインメモリ実装** — `memio` が本物と同じ契約を満たすハンドラを提供します。手書きの
-  フェイクは要りません。
-* **接続先の差し替え** — MinIO や Cloudflare R2 のような S3 互換ストレージ、生成済みクライアントの
-  再利用に対応します。
-
-インターフェースの定義、番兵エラー、書き込み・一覧のオプション、`gcs` / `s3` の接続オプションは
-[pkg.go.dev](https://pkg.go.dev/github.com/shouni/go-remote-io/remoteio) にあります。
+The sister library [go-web-reader](https://github.com/shouni/go-web-reader) also reads `gs://`, but
+it serves a different stage. **go-remote-io is where artifacts are kept**: it reads and writes, has
+signed URLs and listings, and handles local files too. **go-web-reader is where source material comes
+from**: read-only, including `https://`, and it extracts only the main text from HTML. The
+item-by-item comparison is in
+[go-web-reader's README](https://github.com/shouni/go-web-reader#go-remote-io-との線引き)
+(it lives only in the later of the two, because keeping it in both would always leave one stale).
 
 ---
 
-## 📦 パッケージ構成 (Package Structure)
+## ✨ Features
+
+* **Dispatch by scheme** — looks at `gs://` / `s3://` / `file://` / anything else as local, and
+  delegates to the registered handler. **The supported schemes are fixed at construction**, and an
+  unregistered scheme is rejected explicitly with `ErrUnsupportedScheme`. A missing configuration is
+  never mistaken for an unsupported one.
+* **One entry point (`Store`)** — reading, writing, listing, existence checks, metadata, deletion,
+  copying and signed URLs all live on one interface. A function that wants a narrower dependency can
+  take `Reader` (just `Open`) or `Writer` (just `Write`).
+* **Scoped stores (`Sub`)** — creates a store pinned to a prefix, so the bucket name no longer has to
+  be carried into every call.
+* **Atomic writes** — unless a write succeeds, the destination does not change. Local files use a
+  temporary file + `rename`, GCS aborts the upload, and S3 aborts the multipart upload. Conditional
+  writes (`WithIfNotExists`) are available too.
+* **Typed listings** — `List` returns `iter.Seq2[Entry, error]`, and pseudo-directories are told apart
+  by `Entry.IsPrefix`. A `break` stops the iteration as is.
+* **Server-side copy** — `Store.Copy` falls through to a server-side copy when the handler supports it
+  within the same scheme, and relays a stream otherwise. The caller needs no branching.
+* **Scheme-independent errors** — "not found" is always returned wrapping `ErrNotExist` (the same
+  value as `io/fs`), so a single `errors.Is` decides it whatever the backend.
+* **A core free of cloud SDKs** — the `remoteio` package itself does not import the GCS or AWS SDK.
+* **An in-memory implementation for tests** — `memio` provides a handler that meets the same contract
+  as the real ones. No hand-written fakes needed.
+* **Swappable endpoints** — supports S3-compatible storage such as MinIO and Cloudflare R2, and reusing
+  a client you already built.
+
+Interface definitions, sentinel errors, write and list options, and the `gcs` / `s3` connection
+options are on [pkg.go.dev](https://pkg.go.dev/github.com/shouni/go-remote-io/remoteio).
+
+---
+
+## 📦 Package Structure
 
 ```text
 go-remote-io/
-└── remoteio/       # 抽象（Store / Handler / Entry / エラーの語彙 / URI とパスの操作）とローカル・file:// の実装
-    ├── gcs/        # GCS 具象実装。クライアントの寿命と Handler / Copier / Signer
-    ├── s3/         # S3 具象実装。同上
-    ├── memio/      # インメモリの Handler。テストで本物の代わりに使う
-    └── storetest/  # Handler の適合性テストスイート
+└── remoteio/       # Abstractions (Store / Handler / Entry / error vocabulary / URI and path operations) and the local and file:// implementation
+    ├── gcs/        # GCS implementation. Client lifetime and Handler / Copier / Signer
+    ├── s3/         # S3 implementation. Same as above
+    ├── memio/      # In-memory Handler, used in tests in place of the real ones
+    └── storetest/  # Conformance test suite for Handler
 ```
 
-**クラウド SDK に触れてよいのは `gcs` と `s3` だけです。** 抽象だけを使うアプリケーションのビルドに
-SDK を持ち込まないための境界なので、`remoteio` 直下に SDK 依存を足さないでください。
+**Only `gcs` and `s3` may touch a cloud SDK.** This boundary keeps SDKs out of the build of
+applications that use only the abstractions, so do not add an SDK dependency directly under
+`remoteio`.
 
-新しいストレージへ広げるときに実装するのは `Handler` 1 本だけです。書いたハンドラは
-`storetest.TestHandler` に通してください。GCS / S3 / ローカル / `memio` / 第三者の実装が、すべて同じ
-1 本のスイートで検査されます。これが無いと、フェイクと本物がずれても CI は緑のままになります。
+To extend to a new storage backend, `Handler` is the only thing to implement. Run the handler you
+write through `storetest.TestHandler`. GCS, S3, local, `memio` and third-party implementations are all
+checked by the same single suite. Without it, CI stays green even when a fake and the real thing drift
+apart.
 
 ---
 
-## 🚦 使い方 (Usage)
+## 🚦 Usage
 
 ```go
 factory, err := gcs.New(ctx)
@@ -93,36 +100,37 @@ if err != nil {
     return err
 }
 
-// 組み立て時に一度だけスコープを決めれば、以降はバケットを連れ回さずに済みます
+// Decide the scope once at assembly time, and the bucket no longer has to be carried around
 jobs := store.Sub("gs://my-bucket/jobs")
 err = jobs.Write(ctx, jobID+"/status.json", body, remoteio.WithContentType("application/json"))
 ```
 
-`Sub` が返すストアはそのプレフィックスからの**相対名だけ**を受け取ります（絶対 URI を渡すと
-`ErrAbsoluteName` です）。複数のクラウドを 1 つのストアにしたい場合は、各ファクトリの `Handler()` を
-`remoteio.NewStore` へ並べてください。ローカルと `file://` は自動で足されます。
+A store returned by `Sub` accepts **only names relative to** its prefix (passing an absolute URI is
+`ErrAbsoluteName`). To put several clouds into one store, line up each factory's `Handler()` in
+`remoteio.NewStore`. Local paths and `file://` are added automatically.
 
-**踏むと高くつく点も、それぞれの godoc に書いてあります** — 何も無いプレフィックスの一覧が空で
-返りエラーにならないこと、区切り文字を渡さない一覧が配下を再帰的に返すこと、リモート URI は URL
-ではないので `net/url` ではなく `Dir` / `Join` / `BuildURI` を使うこと。
+**The points that cost you when stepped on are written in their godoc too** — listing a prefix with
+nothing under it returns empty rather than an error, listing without a delimiter returns everything
+below recursively, and remote URIs are not URLs, so use `Dir` / `Join` / `BuildURI` rather than
+`net/url`.
 
 ---
 
-## 🤝 依存関係 (Dependencies)
+## 🤝 Dependencies
 
 * [cloud.google.com/go/storage](https://github.com/googleapis/google-cloud-go/tree/main/storage) -
-  GCS 公式 Go クライアント（`remoteio/gcs` のみ）
-* [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) - AWS SDK for Go v2。書き込みは
+  the official GCS Go client (`remoteio/gcs` only)
+* [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) - AWS SDK for Go v2. Writes go through
   [feature/s3/transfermanager](https://github.com/aws/aws-sdk-go-v2/tree/main/feature/s3/transfermanager)
-  を通します（`remoteio/s3` のみ）
+  (`remoteio/s3` only)
 
-テスト専用の依存として [testify](https://github.com/stretchr/testify)、実 I/O を伴う統合テスト用に
-[fake-gcs-server](https://github.com/fsouza/fake-gcs-server) と
-[gofakes3](https://github.com/johannesboyne/gofakes3) を使っています。どちらもプロセス内で起動するため、
-テストの実行に docker や認証情報は要りません。
+Test-only dependencies are [testify](https://github.com/stretchr/testify), plus
+[fake-gcs-server](https://github.com/fsouza/fake-gcs-server) and
+[gofakes3](https://github.com/johannesboyne/gofakes3) for integration tests with real I/O. Both start
+in-process, so running the tests needs neither docker nor credentials.
 
 ---
 
-## 📜 ライセンス (License)
+## 📜 License
 
-このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
+This project is released under the [MIT License](https://opensource.org/licenses/MIT).

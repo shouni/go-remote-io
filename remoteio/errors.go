@@ -6,55 +6,56 @@ import (
 	"io/fs"
 )
 
-// このパッケージが返す番兵エラーです。呼び出し側がメッセージ文字列ではなく
-// errors.Is で分岐できるようにするためのものです。
+// Sentinel errors returned by this package. They let callers branch with
+// errors.Is rather than on message strings.
 //
-// 番兵が無いと「未対応のURIスキームです」のような判定は文字列比較でしか書けず、
-// 利用側がその文言を自前で持つことになります。そうなるとライブラリ側で
-// メッセージを変えたときに、静かに壊れます。
+// Without sentinels, a check such as "this URI scheme is not supported" could only
+// be written as a string comparison, and consumers would carry the wording
+// themselves. Then a message change in the library would break them silently.
 //
-// 番兵の文言は英語で "remoteio: " を接頭辞に付けます。ラップする側の説明文は
-// 日本語のままです（番兵は識別子、ラップは読み手向けの文脈という切り分け）。
+// Sentinel messages carry the "remoteio: " prefix. Wrapping adds context for the
+// reader (a sentinel is an identifier; a wrap is context for whoever reads it).
 var (
-	// ErrNotExist は、対象のオブジェクトやファイルが存在しないことを表します。
-	// スキームに依らず errors.Is(err, remoteio.ErrNotExist) で判定できます。
-	// io/fs と同じ値なので os.ErrNotExist とも一致します。
+	// ErrNotExist reports that the target object or file does not exist.
+	// Whatever the scheme, errors.Is(err, remoteio.ErrNotExist) detects it.
+	// It is the same value as in io/fs, so it also matches os.ErrNotExist.
 	ErrNotExist = fs.ErrNotExist
 
-	// ErrExist は、WithIfNotExists を指定した書き込みで対象が既に存在したことを表します。
-	// io/fs と同じ値なので os.ErrExist とも一致します。
+	// ErrExist reports that, in a write with WithIfNotExists, the target already existed.
+	// It is the same value as in io/fs, so it also matches os.ErrExist.
 	ErrExist = fs.ErrExist
 
-	// ErrUnsupportedScheme は、どのハンドラも担当していない URI スキームを表します。
+	// ErrUnsupportedScheme reports a URI scheme that no handler is responsible for.
 	ErrUnsupportedScheme = errors.New("remoteio: unsupported URI scheme")
 
-	// ErrClosed は、既にクローズされたファクトリやストアを操作したことを表します。
+	// ErrClosed reports that a factory or store that was already closed was used.
 	ErrClosed = errors.New("remoteio: factory is closed")
 
-	// ErrNotSupported は、ハンドラがその操作に対応していないことを表します。
-	// 署名付き URL やサーバーサイドコピーのような任意インターフェースを
-	// 実装していないハンドラへ要求したときに返ります。
+	// ErrNotSupported reports that the handler does not support the operation.
+	// It is returned when a handler that does not implement an optional interface,
+	// such as signed URLs or server-side copy, is asked for it.
 	ErrNotSupported = errors.New("remoteio: operation not supported by handler")
 
-	// ErrAbsoluteName は、スコープ付きストア (Store.Sub の戻り値) へ
-	// スキーム付きの絶対 URI を渡したことを表します。
+	// ErrAbsoluteName reports that an absolute URI with a scheme was passed to a
+	// scoped store (the return value of Store.Sub).
 	//
-	// 黙って素通しすると、スコープを絞ったつもりのコードが別のバケットへ書けて
-	// しまいます。絶対 URI を扱いたい場合はルートのストアを使ってください。
+	// Letting it through silently would let code that thinks it narrowed its scope
+	// write to another bucket. Use the root store to handle absolute URIs.
 	ErrAbsoluteName = errors.New("remoteio: absolute URI passed to a scoped store")
 
-	// ErrInvalidURI は、URI の形が想定と違うことを表します
-	// （スキームが無い、バケット名が空、オブジェクト名が必要なのに空など）。
+	// ErrInvalidURI reports that a URI is not in the expected shape
+	// (no scheme, an empty bucket name, an empty object name where one is required, and so on).
 	ErrInvalidURI = errors.New("remoteio: invalid URI")
 )
 
-// wrapf は、番兵を保ったまま日本語の文脈を付けてエラーを包みます。
-// 呼び出し側の判定は errors.Is で、読み手向けの説明は日本語で、という切り分けを
-// 全ファイルで同じ形に保つための補助です。
+// wrapf wraps an error with context while keeping the sentinel.
+// It keeps the split — callers decide with errors.Is, readers get an explanation —
+// in the same shape across every file.
 //
-// 文脈は先に整形し切ってから %s で渡します。整形済みの文字列をもう一度書式として
-// 解釈させると、オブジェクト名に % が入っただけで %w の対応がずれ、errors.Is が
-// 効かなくなります（オブジェクト名は任意のバイト列です）。
+// The context is fully formatted first and then passed as %s. Letting an already
+// formatted string be interpreted as a format again would shift the %w pairing as
+// soon as an object name contains %, and errors.Is would stop working (object names
+// are arbitrary byte sequences).
 func wrapf(err error, format string, args ...any) error {
 	return fmt.Errorf("%s: %w", fmt.Sprintf(format, args...), err)
 }

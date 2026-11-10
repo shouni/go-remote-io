@@ -16,13 +16,13 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// Scheme は、このパッケージが担当するスキーム名です（区切りは含みません）。
+// Scheme is the scheme name this package is responsible for (without the separator).
 const Scheme = remoteio.SchemeGCS
 
-// Handler は Google Cloud Storage を扱う remoteio.Handler です。
+// Handler is the remoteio.Handler for Google Cloud Storage.
 //
-// サーバーサイドコピー (remoteio.Copier) と署名付き URL (remoteio.Signer) の
-// 任意インターフェースも実装します。
+// It also implements the optional interfaces for server-side copy (remoteio.Copier)
+// and signed URLs (remoteio.Signer).
 type Handler struct {
 	client *storage.Client
 }
@@ -33,16 +33,16 @@ var (
 	_ remoteio.Signer  = (*Handler)(nil)
 )
 
-// NewHandler は GCS クライアントを包んだハンドラを返します。
+// NewHandler returns a handler wrapping a GCS client.
 func NewHandler(client *storage.Client) *Handler {
 	return &Handler{client: client}
 }
 
-// Scheme は "gs" を返します。
+// Scheme returns "gs".
 func (h *Handler) Scheme() string { return Scheme }
 
-// Open は GCS オブジェクトの読み取りストリームを返します。
-// オブジェクトが存在しない場合のエラーは remoteio.ErrNotExist を含みます。
+// Open returns a read stream for a GCS object.
+// When the object does not exist, the error contains remoteio.ErrNotExist.
 func (h *Handler) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {
@@ -54,13 +54,13 @@ func (h *Handler) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			return nil, notExist(uri)
 		}
-		return nil, fmt.Errorf("GCS読み込み失敗 (URI: %s): %w", uri, err)
+		return nil, fmt.Errorf("GCS read failed (URI: %s): %w", uri, err)
 	}
 	return rc, nil
 }
 
-// Stat は GCS オブジェクトのメタデータを返します。
-// 見つからない場合のエラーは Open と同じく remoteio.ErrNotExist を含みます。
+// Stat returns the metadata of a GCS object.
+// When it is not found, the error contains remoteio.ErrNotExist, as with Open.
 func (h *Handler) Stat(ctx context.Context, uri string) (remoteio.ObjectInfo, error) {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {
@@ -72,7 +72,7 @@ func (h *Handler) Stat(ctx context.Context, uri string) (remoteio.ObjectInfo, er
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			return remoteio.ObjectInfo{}, notExist(uri)
 		}
-		return remoteio.ObjectInfo{}, fmt.Errorf("GCS属性取得失敗 (URI: %s): %w", uri, err)
+		return remoteio.ObjectInfo{}, fmt.Errorf("GCS attrs failed (URI: %s): %w", uri, err)
 	}
 
 	return remoteio.ObjectInfo{
@@ -84,10 +84,10 @@ func (h *Handler) Stat(ctx context.Context, uri string) (remoteio.ObjectInfo, er
 	}, nil
 }
 
-// List はプレフィックス配下のオブジェクトを列挙します。
+// List enumerates the objects under the prefix.
 func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOptions) iter.Seq2[remoteio.Entry, error] {
-	// Router は正規化済みの URI を渡しますが、ハンドラは公開されているため
-	// 直接呼ばれる余地があります。冪等なのでここでも通します。
+	// Router passes a normalized URI, but handlers are exported and can be called
+	// directly. Normalization is idempotent, so it is applied here as well.
 	uri = remoteio.ListPrefix(uri)
 
 	bucket, prefix, err := h.parseBucketURI(uri)
@@ -104,11 +104,11 @@ func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOption
 				return
 			}
 			if err != nil {
-				yield(remoteio.Entry{}, fmt.Errorf("GCSリスト取得失敗 (イテレーション中, URI: %s): %w", uri, err))
+				yield(remoteio.Entry{}, fmt.Errorf("GCS list failed (during iteration, URI: %s): %w", uri, err))
 				return
 			}
 
-			// 区切り文字を指定したとき、疑似ディレクトリは Name が空で Prefix に入ります。
+			// With a delimiter, a pseudo-directory has an empty Name and is in Prefix.
 			entry := remoteio.Entry{
 				Size:    attrs.Size,
 				ModTime: attrs.Updated,
@@ -132,34 +132,34 @@ func (h *Handler) List(ctx context.Context, uri string, opts remoteio.ListOption
 	}
 }
 
-// Write は GCS オブジェクトへ書き込みます。
+// Write writes to a GCS object.
 //
-// 失敗経路で storage.Writer.Close() をそのまま呼んではいけません。あれは
-// アップロードを「完了」させる API なので、呼べば失敗した書き込みが中途半端な
-// オブジェクトとして残ります。中断の手順は io.Copy の失敗経路のコメントにあります。
-// 正しく中断する限り、切り詰められたオブジェクトは残りません。
+// storage.Writer.Close() must not be called as is on the failure path. It is the API
+// that "completes" the upload, so calling it leaves the failed write behind as a
+// partial object. The abort procedure is in the comment on the io.Copy failure path.
+// As long as it aborts correctly, no truncated object is left behind.
 func (h *Handler) Write(ctx context.Context, uri string, src io.Reader, opts remoteio.WriteOptions) error {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {
 		return err
 	}
 
-	slog.DebugContext(ctx, "GCS書き込み処理開始",
+	slog.DebugContext(ctx, "GCS write started",
 		slog.String("uri", uri),
 		slog.String("content_type", opts.ContentType),
 		slog.String("disposition", opts.ContentDisposition),
 		slog.String("cache_control", opts.CacheControl),
 	)
 
-	// 失敗経路でアップロードを中断するための ctx です。成功して Close したあとに
-	// cancel が走っても影響はありません。
+	// A ctx for aborting the upload on the failure path. cancel running after a
+	// successful Close has no effect.
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	handle := h.client.Bucket(bucket).Object(object)
 	if opts.IfNotExists {
-		// 存在確認と書き込みの間に他のプロセスが割り込めないよう、判定を
-		// ストレージ側の前提条件に委ねます。
+		// Leave the decision to the storage-side precondition, so no other process can
+		// slip in between the existence check and the write.
 		handle = handle.If(storage.Conditions{DoesNotExist: true})
 	}
 
@@ -175,43 +175,43 @@ func (h *Handler) Write(ctx context.Context, uri string, src io.Reader, opts rem
 		wc.Metadata = opts.Metadata
 	}
 
-	// n は「Writer を開いたか」の判定に使います。io.Copy は 1 バイトも読めなければ
-	// Write を呼ばず、その場合 SDK は内部の goroutine もリクエストも起こしていません。
+	// n tells whether the Writer was opened. When io.Copy cannot read a single byte it
+	// never calls Write, and then the SDK has started neither its internal goroutine nor a request.
 	n, copyErr := io.Copy(wc, src)
 	if copyErr != nil {
 		cancel()
 
 		if n > 0 {
-			// 中断はパイプ側で行います。storage.Writer は内部の goroutine が
-			// io.Pipe からボディを読んでアップロードするので、パイプにエラーを
-			// 立てればリクエストは必ず失敗し、オブジェクトはできません。
-			// ctx のキャンセルに頼るとトランスポート任せになり、実際 GCS フェイクは
-			// キャンセル済みの ctx でもアップロードを完了させます。
-			_ = wc.CloseWithError(copyErr) //nolint:staticcheck // 中断の正規手段。下のコメント参照
-			// CloseWithError は goroutine の終了を待たないため、続けて Close します。
-			// パイプには既にエラーが立っているのでアップロードが完了することはなく、
-			// Close の中の <-donec で後始末まで待てます。これが無いと Write が
-			// 走行中の goroutine を残したまま返ります。
+			// Abort on the pipe side. storage.Writer uploads with an internal goroutine
+			// reading the body from an io.Pipe, so setting an error on the pipe makes the
+			// request certain to fail, and no object is created.
+			// Relying on ctx cancellation leaves it to the transport, and in fact the GCS
+			// fake completes uploads even with a cancelled ctx.
+			_ = wc.CloseWithError(copyErr) //nolint:staticcheck // the proper way to abort; see the comment below
+			// CloseWithError does not wait for the goroutine to finish, so Close follows.
+			// The pipe already carries an error, so the upload never completes, and the
+			// <-donec inside Close waits until cleanup is done. Without it, Write would
+			// return leaving the goroutine running.
 			_ = wc.Close()
 		}
-		// n == 0 のときは Writer が未オープンです。ここで Close すると
-		// openWriter が走ってゼロバイトのオブジェクトができるため、触りません。
+		// When n == 0 the Writer has not been opened. Calling Close here would run
+		// openWriter and create a zero-byte object, so it is left alone.
 
-		return fmt.Errorf("GCSへのコンテンツ書き込み中にエラーが発生しました (URI: %s): %w", uri, copyErr)
+		return fmt.Errorf("write content to GCS (URI: %s): %w", uri, copyErr)
 	}
 
 	if err := wc.Close(); err != nil {
 		if opts.IfNotExists && isPreconditionFailed(err) {
-			return fmt.Errorf("GCSオブジェクトは既に存在します (URI: %s): %w", uri, remoteio.ErrExist)
+			return fmt.Errorf("GCS object already exists (URI: %s): %w", uri, remoteio.ErrExist)
 		}
-		return fmt.Errorf("GCS Writerのクローズに失敗しました (URI: %s, アップロード処理中のエラー): %w", uri, err)
+		return fmt.Errorf("close GCS writer (URI: %s, error during upload): %w", uri, err)
 	}
 
-	slog.DebugContext(ctx, "GCS書き込み処理完了", slog.String("uri", uri))
+	slog.DebugContext(ctx, "GCS write finished", slog.String("uri", uri))
 	return nil
 }
 
-// Delete は GCS オブジェクトを削除します。不在はエラーにしません。
+// Delete removes a GCS object. Absence is not an error.
 func (h *Handler) Delete(ctx context.Context, uri string) error {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {
@@ -219,15 +219,15 @@ func (h *Handler) Delete(ctx context.Context, uri string) error {
 	}
 	err = h.client.Bucket(bucket).Object(object).Delete(ctx)
 	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
-		return fmt.Errorf("GCSオブジェクトの削除に失敗しました (URI: %s): %w", uri, err)
+		return fmt.Errorf("delete GCS object (URI: %s): %w", uri, err)
 	}
 	return nil
 }
 
-// CopyTo は GCS のサーバーサイドコピーでオブジェクトを複製します。
+// CopyTo duplicates an object with a GCS server-side copy.
 //
-// remoteio.Copier の実装です。中身がクライアントを往復しないため、
-// バケット間・同一バケット内のどちらでも転送量と時間を使いません。
+// It implements remoteio.Copier. The contents never travel through the client, so
+// neither transfer volume nor time is spent, whether across buckets or within one.
 func (h *Handler) CopyTo(ctx context.Context, src, dst string) error {
 	srcBucket, srcObject, err := h.parseObjectURI(src)
 	if err != nil {
@@ -243,36 +243,36 @@ func (h *Handler) CopyTo(ctx context.Context, src, dst string) error {
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			return notExist(src)
 		}
-		return fmt.Errorf("GCSサーバーサイドコピーに失敗しました (%s -> %s): %w", src, dst, err)
+		return fmt.Errorf("GCS server-side copy (%s -> %s): %w", src, dst, err)
 	}
 	return nil
 }
 
-// parseBucketURI は URI を検証してバケット名とプレフィックスに分解します
-// （オブジェクト名は空でも可）。一覧のようにプレフィックスが空でも意味を持つ操作で使います。
+// parseBucketURI validates the URI and splits it into a bucket name and a prefix
+// (the object name may be empty). Used for operations where an empty prefix is meaningful, such as listings.
 func (h *Handler) parseBucketURI(uri string) (bucket, prefix string, err error) {
 	if h.client == nil {
-		return "", "", fmt.Errorf("GCSクライアントが未初期化です (URI: %s): %w", uri, remoteio.ErrClosed)
+		return "", "", fmt.Errorf("GCS client is not initialized (URI: %s): %w", uri, remoteio.ErrClosed)
 	}
 	return remoteio.ParseBucketURI(Scheme, uri)
 }
 
-// parseObjectURI は URI を検証してバケット名とオブジェクト名に分解します。
-// オブジェクト名が空の URI (gs://bucket) を拒否する理由は remoteio.ParseObjectURI を参照してください。
+// parseObjectURI validates the URI and splits it into a bucket name and an object name.
+// See remoteio.ParseObjectURI for why URIs with an empty object name (gs://bucket) are rejected.
 func (h *Handler) parseObjectURI(uri string) (bucket, object string, err error) {
 	if h.client == nil {
-		return "", "", fmt.Errorf("GCSクライアントが未初期化です (URI: %s): %w", uri, remoteio.ErrClosed)
+		return "", "", fmt.Errorf("GCS client is not initialized (URI: %s): %w", uri, remoteio.ErrClosed)
 	}
 	return remoteio.ParseObjectURI(Scheme, uri)
 }
 
-// notExist は「見つからない」を remoteio.ErrNotExist を含む形で返します。
-// 呼び出し側がスキームに依らず errors.Is で判定できることが、この抽象の前提です。
+// notExist returns "not found" in a form that contains remoteio.ErrNotExist.
+// That callers can detect it with errors.Is whatever the scheme is the premise of this abstraction.
 func notExist(uri string) error {
-	return fmt.Errorf("GCSオブジェクトが見つかりません (URI: %s): %w", uri, remoteio.ErrNotExist)
+	return fmt.Errorf("GCS object not found (URI: %s): %w", uri, remoteio.ErrNotExist)
 }
 
-// isPreconditionFailed は、DoesNotExist の前提条件が満たされなかった応答かを判定します。
+// isPreconditionFailed reports whether the response is a failed DoesNotExist precondition.
 func isPreconditionFailed(err error) bool {
 	if apiErr, ok := errors.AsType[*googleapi.Error](err); ok {
 		return apiErr.Code == 412
@@ -280,7 +280,7 @@ func isPreconditionFailed(err error) bool {
 	return false
 }
 
-// errSeq は、反復を始める前に失敗したことを 1 度だけ伝える反復子を返します。
+// errSeq returns an iterator that reports, once, a failure before iteration started.
 func errSeq(err error) iter.Seq2[remoteio.Entry, error] {
 	return func(yield func(remoteio.Entry, error) bool) { yield(remoteio.Entry{}, err) }
 }

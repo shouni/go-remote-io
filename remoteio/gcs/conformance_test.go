@@ -11,8 +11,8 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/storetest"
 )
 
-// 本物の GCS ハンドラを、memio やローカルと同じ 1 本のスイートに通します。
-// 実装ごとに別のテストを書いていると、契約の食い違いはテストの外に残ります。
+// Runs the real GCS handler through the same single suite as memio and local.
+// With a separate test per implementation, contract mismatches stay outside the tests.
 func TestConformance(t *testing.T) {
 	storetest.TestHandler(t, func(t *testing.T) storetest.Fixture {
 		server, err := fakestorage.NewServerWithOptions(fakestorage.Options{BucketsLocation: "US"})

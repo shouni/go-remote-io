@@ -1,5 +1,5 @@
-// Package s3 は、Amazon S3 向けの remoteio.Handler と
-// そのライフサイクルを管理するファクトリを提供します。
+// Package s3 provides a remoteio.Handler for Amazon S3 and a factory that manages
+// its lifecycle.
 package s3
 
 import (
@@ -14,12 +14,12 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// DefaultRegion は、リージョンが解決できなかった場合に適用されるリージョンです。
+// DefaultRegion is the region applied when no region can be resolved.
 const DefaultRegion = "ap-northeast-1"
 
-// ClientFactory は S3 クライアントのライフサイクルを持ちます。
+// ClientFactory owns the lifecycle of an S3 client.
 //
-// Close と各アクセサは並行に呼ばれても安全です。
+// Close and each accessor are safe to call concurrently.
 type ClientFactory struct {
 	mu        sync.RWMutex
 	client    *s3.Client
@@ -28,7 +28,7 @@ type ClientFactory struct {
 
 var _ remoteio.Factory = (*ClientFactory)(nil)
 
-// settings は Option を解決した結果です。
+// settings is the result of resolving Option values.
 type settings struct {
 	client       *s3.Client
 	awsConfig    *aws.Config
@@ -39,55 +39,55 @@ type settings struct {
 	s3Opts       []func(*s3.Options)
 }
 
-// Option は ClientFactory の生成方法を変える Functional Option です。
+// Option is a functional option that changes how a ClientFactory is created.
 //
-// 以前は config.LoadDefaultConfig(ctx) 決め打ちだったため、S3 互換ストレージ
-// (MinIO, Cloudflare R2 など) やカスタムエンドポイントへ接続する手段が無く、
-// ファクトリを使うか自前で Router を組むかの二択になっていました。
+// It used to be hard-wired to config.LoadDefaultConfig(ctx), so there was no way to
+// connect to S3-compatible storage (MinIO, Cloudflare R2 and so on) or a custom
+// endpoint; the choice was between using the factory and building a Router yourself.
 type Option func(*settings)
 
-// WithClient は生成済みの S3 クライアントを使います。
-// このとき aws.Config は解決されないため、awsConfig はゼロ値のままです。
+// WithClient uses an already created S3 client.
+// No aws.Config is resolved in that case, so awsConfig stays the zero value.
 func WithClient(client *s3.Client) Option {
 	return func(s *settings) { s.client = client }
 }
 
-// WithConfig は解決済みの aws.Config を使い、LoadDefaultConfig を呼びません。
+// WithConfig uses an already resolved aws.Config and does not call LoadDefaultConfig.
 func WithConfig(cfg aws.Config) Option {
 	return func(s *settings) { s.awsConfig = &cfg }
 }
 
-// WithRegion はリージョンを明示します。環境や設定ファイルより優先されます。
+// WithRegion sets the region explicitly. It takes precedence over the environment and config files.
 func WithRegion(region string) Option {
 	return func(s *settings) { s.region = region }
 }
 
-// WithEndpoint は接続先エンドポイントを差し替えます。
-// MinIO や Cloudflare R2 のような S3 互換ストレージ、およびテスト用のフェイク向けです。
+// WithEndpoint replaces the endpoint to connect to.
+// It is meant for S3-compatible storage such as MinIO and Cloudflare R2, and for test fakes.
 func WithEndpoint(endpoint string) Option {
 	return func(s *settings) { s.endpoint = endpoint }
 }
 
-// WithPathStyle はパス形式のアドレッシングを使います。
-// 仮想ホスト形式のバケット名を解決できない S3 互換ストレージで必要になります。
+// WithPathStyle uses path-style addressing.
+// It is needed for S3-compatible storage that cannot resolve virtual-hosted-style bucket names.
 func WithPathStyle() Option {
 	return func(s *settings) { s.usePathStyle = true }
 }
 
-// WithConfigOptions は config.LoadDefaultConfig へ渡すオプションを指定します
-// （認証情報プロバイダの差し替えなど）。
+// WithConfigOptions sets the options passed to config.LoadDefaultConfig
+// (to swap the credentials provider, for example).
 func WithConfigOptions(opts ...func(*config.LoadOptions) error) Option {
 	return func(s *settings) { s.configOpts = append(s.configOpts, opts...) }
 }
 
-// WithS3Options は s3.NewFromConfig へ渡すオプションを指定します。
-// WithEndpoint / WithPathStyle より後に適用されるため、必要なら上書きできます。
+// WithS3Options sets the options passed to s3.NewFromConfig.
+// They are applied after WithEndpoint / WithPathStyle, so they can override those if needed.
 func WithS3Options(opts ...func(*s3.Options)) Option {
 	return func(s *settings) { s.s3Opts = append(s.s3Opts, opts...) }
 }
 
-// New は新しい ClientFactory インスタンスを作成します。
-// オプションを渡さない場合は IAMロールや環境変数から設定を自動検索します。
+// New creates a new ClientFactory instance.
+// Without options, configuration is discovered automatically from IAM roles and environment variables.
 func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
 	var cfg settings
 	for _, opt := range opts {
@@ -111,8 +111,8 @@ func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
 	}, nil
 }
 
-// resolveAWSConfig は aws.Config を決定します。
-// 明示指定 > 環境や設定ファイル > DefaultRegion の順でリージョンが決まります。
+// resolveAWSConfig decides the aws.Config.
+// The region is decided in the order: explicit > environment or config file > DefaultRegion.
 func resolveAWSConfig(ctx context.Context, cfg settings) (aws.Config, error) {
 	awsCfg := aws.Config{}
 	if cfg.awsConfig != nil {
@@ -120,7 +120,7 @@ func resolveAWSConfig(ctx context.Context, cfg settings) (aws.Config, error) {
 	} else {
 		loaded, err := config.LoadDefaultConfig(ctx, cfg.configOpts...)
 		if err != nil {
-			return aws.Config{}, fmt.Errorf("AWS設定のロードに失敗しました (認証情報が不足しています): %w", err)
+			return aws.Config{}, fmt.Errorf("load AWS config (missing credentials): %w", err)
 		}
 		awsCfg = loaded
 	}
@@ -134,7 +134,7 @@ func resolveAWSConfig(ctx context.Context, cfg settings) (aws.Config, error) {
 	return awsCfg, nil
 }
 
-// clientOptions は s3.NewFromConfig へ渡すオプションを組み立てます。
+// clientOptions builds the options passed to s3.NewFromConfig.
 func clientOptions(cfg settings) []func(*s3.Options) {
 	opts := make([]func(*s3.Options), 0, len(cfg.s3Opts)+2)
 	if cfg.endpoint != "" {
@@ -146,10 +146,10 @@ func clientOptions(cfg settings) []func(*s3.Options) {
 	return append(opts, cfg.s3Opts...)
 }
 
-// Close はクライアントへの参照を手放します。冪等です。
+// Close drops the reference to the client. It is idempotent.
 //
-// aws-sdk-go-v2 の s3.Client は明示的な Close を必要としませんが、
-// クローズ後のアクセサが ErrClosed を返す契約を GCS 側と揃えています。
+// The aws-sdk-go-v2 s3.Client needs no explicit Close, but the contract that
+// accessors return ErrClosed after Close is kept the same as on the GCS side.
 func (f *ClientFactory) Close() error {
 	f.mu.Lock()
 	f.client = nil
@@ -157,10 +157,10 @@ func (f *ClientFactory) Close() error {
 	return nil
 }
 
-// Handler は s3:// を担当するハンドラを返します。
+// Handler returns the handler responsible for s3://.
 //
-// 複数のクラウドを 1 つの Store で扱いたい場合は、各ファクトリから取り出した
-// ハンドラを remoteio.NewStore へ並べてください。
+// To handle several clouds in one Store, line up the handlers taken from each
+// factory in remoteio.NewStore.
 func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	client, err := f.s3Client()
 	if err != nil {
@@ -169,8 +169,8 @@ func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	return NewHandler(client), nil
 }
 
-// Store は s3:// とローカル関連のパスを扱う Store を返します
-// （gs:// は登録されないため明確に未対応となります）。
+// Store returns a Store that handles s3:// and local paths
+// (gs:// is not registered, so it is clearly unsupported).
 func (f *ClientFactory) Store() (remoteio.Store, error) {
 	handler, err := f.Handler()
 	if err != nil {
@@ -179,13 +179,13 @@ func (f *ClientFactory) Store() (remoteio.Store, error) {
 	return remoteio.NewStore(handler), nil
 }
 
-// s3Client はクライアントが存命かを確かめて返します。
+// s3Client checks that the client is still alive and returns it.
 func (f *ClientFactory) s3Client() (*s3.Client, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	if f.client == nil {
-		return nil, fmt.Errorf("S3クライアントは初期化されていないか、既にクローズされています: %w", remoteio.ErrClosed)
+		return nil, fmt.Errorf("S3 client is not initialized or already closed: %w", remoteio.ErrClosed)
 	}
 	return f.client, nil
 }

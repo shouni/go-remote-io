@@ -12,14 +12,14 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// SignURL は S3 URI に対応する署名付き URL を生成します。
+// SignURL generates a signed URL for an S3 URI.
 //
-// remoteio.Signer の実装です。スキームは厳格で s3:// のみ、
-// メソッドは GET / PUT のみをサポートします。
+// It implements remoteio.Signer. The scheme is strict, s3:// only, and only the
+// GET / PUT methods are supported.
 func (h *Handler) SignURL(ctx context.Context, uri, method string, expires time.Duration) (string, error) {
 	bucket, key, err := h.parseObjectURI(uri)
 	if err != nil {
-		return "", fmt.Errorf("署名付きURLの生成に失敗しました: %w", err)
+		return "", fmt.Errorf("generate signed URL: %w", err)
 	}
 
 	presign := awss3.NewPresignClient(h.client)
@@ -30,7 +30,7 @@ func (h *Handler) SignURL(ctx context.Context, uri, method string, expires time.
 			Key:    aws.String(key),
 		}, awss3.WithPresignExpires(expires))
 		if err != nil {
-			return "", fmt.Errorf("S3 GET署名付きURLの生成に失敗しました (URI: %s): %w", uri, err)
+			return "", fmt.Errorf("generate S3 GET signed URL (URI: %s): %w", uri, err)
 		}
 		return request.URL, nil
 	case "PUT":
@@ -39,10 +39,10 @@ func (h *Handler) SignURL(ctx context.Context, uri, method string, expires time.
 			Key:    aws.String(key),
 		}, awss3.WithPresignExpires(expires))
 		if err != nil {
-			return "", fmt.Errorf("S3 PUT署名付きURLの生成に失敗しました (URI: %s): %w", uri, err)
+			return "", fmt.Errorf("generate S3 PUT signed URL (URI: %s): %w", uri, err)
 		}
 		return request.URL, nil
 	default:
-		return "", fmt.Errorf("サポートされていないHTTPメソッドです: %s (GETまたはPUTのみサポート): %w", method, remoteio.ErrNotSupported)
+		return "", fmt.Errorf("unsupported HTTP method: %s (only GET or PUT are supported): %w", method, remoteio.ErrNotSupported)
 	}
 }

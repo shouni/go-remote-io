@@ -1,5 +1,5 @@
-// Package gcs は、Google Cloud Storage 向けの remoteio.Handler と
-// そのライフサイクルを管理するファクトリを提供します。
+// Package gcs provides a remoteio.Handler for Google Cloud Storage and a factory
+// that manages its lifecycle.
 package gcs
 
 import (
@@ -13,45 +13,45 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// ClientFactory は、GCS クライアントのライフサイクルを持ちます。
+// ClientFactory owns the lifecycle of a GCS client.
 //
-// Close と各アクセサは並行に呼ばれても安全です。
+// Close and each accessor are safe to call concurrently.
 type ClientFactory struct {
 	mu     sync.RWMutex
 	client *storage.Client
-	// ownsClient は、Close でクライアントを閉じてよいかを表します。
-	// WithClient で注入されたクライアントのライフサイクルは呼び出し元にあります。
+	// ownsClient reports whether Close may close the client.
+	// The lifecycle of a client injected with WithClient belongs to the caller.
 	ownsClient bool
 }
 
 var _ remoteio.Factory = (*ClientFactory)(nil)
 
-// settings は Option を解決した結果です。
+// settings is the result of resolving Option values.
 type settings struct {
 	client     *storage.Client
 	clientOpts []option.ClientOption
 }
 
-// Option は ClientFactory の生成方法を変える Functional Option です。
+// Option is a functional option that changes how a ClientFactory is created.
 type Option func(*settings)
 
-// WithClient は生成済みの GCS クライアントを使います。
+// WithClient uses an already created GCS client.
 //
-// このクライアントのライフサイクルは呼び出し元に残り、ClientFactory.Close は
-// 閉じません（閉じる主体が 2 つあると、どちらが所有しているのか呼び出し側から
-// 分からなくなるためです）。
+// The lifecycle of this client stays with the caller, and ClientFactory.Close does
+// not close it (with two parties able to close it, the caller could not tell which
+// one owns it).
 func WithClient(client *storage.Client) Option {
 	return func(s *settings) { s.client = client }
 }
 
-// WithClientOptions は storage.NewClient へ渡すオプションを指定します。
-// エミュレータの指定 (option.WithEndpoint) や認証情報の差し替えに使います。
+// WithClientOptions sets the options passed to storage.NewClient.
+// Use it to point at an emulator (option.WithEndpoint) or to swap credentials.
 func WithClientOptions(opts ...option.ClientOption) Option {
 	return func(s *settings) { s.clientOpts = append(s.clientOpts, opts...) }
 }
 
-// New は ClientFactory を作成します。
-// オプションを渡さない場合は Application Default Credentials でクライアントを生成します。
+// New creates a ClientFactory.
+// Without options, the client is created with Application Default Credentials.
 func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
 	var cfg settings
 	for _, opt := range opts {
@@ -66,13 +66,13 @@ func New(ctx context.Context, opts ...Option) (*ClientFactory, error) {
 
 	client, err := storage.NewClient(ctx, cfg.clientOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("GCSクライアントの初期化に失敗しました: %w", err)
+		return nil, fmt.Errorf("initialize GCS client: %w", err)
 	}
 	return &ClientFactory{client: client, ownsClient: true}, nil
 }
 
-// Close は保持している GCS クライアントを解放します。冪等です。
-// WithClient で注入されたクライアントは閉じず、参照だけを手放します。
+// Close releases the GCS client it holds. It is idempotent.
+// A client injected with WithClient is not closed; only the reference is dropped.
 func (f *ClientFactory) Close() error {
 	f.mu.Lock()
 	client, owns := f.client, f.ownsClient
@@ -85,10 +85,10 @@ func (f *ClientFactory) Close() error {
 	return client.Close()
 }
 
-// Handler は gs:// を担当するハンドラを返します。
+// Handler returns the handler responsible for gs://.
 //
-// 複数のクラウドを 1 つの Store で扱いたい場合は、各ファクトリから取り出した
-// ハンドラを remoteio.NewStore へ並べてください。
+// To handle several clouds in one Store, line up the handlers taken from each
+// factory in remoteio.NewStore.
 func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	client, err := f.gcsClient()
 	if err != nil {
@@ -97,8 +97,8 @@ func (f *ClientFactory) Handler() (remoteio.Handler, error) {
 	return NewHandler(client), nil
 }
 
-// Store は gs:// とローカル関連のパスを扱う Store を返します
-// （s3:// は登録されないため明確に未対応となります）。
+// Store returns a Store that handles gs:// and local paths
+// (s3:// is not registered, so it is clearly unsupported).
 func (f *ClientFactory) Store() (remoteio.Store, error) {
 	handler, err := f.Handler()
 	if err != nil {
@@ -107,13 +107,13 @@ func (f *ClientFactory) Store() (remoteio.Store, error) {
 	return remoteio.NewStore(handler), nil
 }
 
-// gcsClient はクライアントが存命かを確かめて返します。
+// gcsClient checks that the client is still alive and returns it.
 func (f *ClientFactory) gcsClient() (*storage.Client, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	if f.client == nil {
-		return nil, fmt.Errorf("GCSクライアントは既にクローズされているか、初期化されていません: %w", remoteio.ErrClosed)
+		return nil, fmt.Errorf("GCS client is already closed or not initialized: %w", remoteio.ErrClosed)
 	}
 	return f.client, nil
 }

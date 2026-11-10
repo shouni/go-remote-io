@@ -12,12 +12,13 @@ import (
 	"time"
 )
 
-// Router は、URI のスキームを見て対応する Handler へ処理を委譲する Store です。
+// Router is a Store that looks at a URI's scheme and delegates to the matching Handler.
 //
-// 振り分けが実行時なのは、パスが設定やユーザー入力から来る以上、どのスキームを
-// 扱うかを静的に決められないためです。一方で「どのスキームに対応しているか」は
-// 構築時に決まる情報なので、ハンドラの集合として明示的に持ちます。
-// ハンドラの集合は構築後に変わらないため、並行に使っても安全です。
+// The dispatch is at run time because paths come from configuration and user input,
+// so which scheme will be handled cannot be decided statically. "Which schemes are
+// supported", on the other hand, is decided at construction, so it is held explicitly
+// as a set of handlers. The set does not change after construction, so a Router is
+// safe for concurrent use.
 type Router struct {
 	handlers map[string]Handler
 	fallback Handler
@@ -25,10 +26,10 @@ type Router struct {
 
 var _ Store = (*Router)(nil)
 
-// NewRouter は、渡されたハンドラを担当スキームごとに登録した Router を返します。
-// Scheme() が空文字のハンドラは、どのスキームにも一致しなかったときの
-// フォールバック（通常はローカルファイルシステム）になります。
-// 同じスキームを複数渡した場合は後勝ちです。
+// NewRouter returns a Router with the given handlers registered under their schemes.
+// A handler whose Scheme() is empty becomes the fallback (usually the local file
+// system) for paths that match no scheme.
+// When the same scheme is passed more than once, the last one wins.
 func NewRouter(handlers ...Handler) *Router {
 	r := &Router{handlers: make(map[string]Handler, len(handlers))}
 	for _, h := range handlers {
@@ -44,12 +45,12 @@ func NewRouter(handlers ...Handler) *Router {
 	return r
 }
 
-// NewStore は、リモート用のハンドラにローカル関連のハンドラを併せて登録した
-// Store を返します。
+// NewStore returns a Store with the local handlers registered alongside the remote
+// handlers.
 //
-// ローカル（スキームなし）と file:// を必ず組にするのは、同じストアで開発時の
-// ローカルファイルも読めるようにするためです。担当外のリモートスキームは
-// 登録されないので、明確に未対応として弾かれます。
+// Local (no scheme) and file:// are always paired so that the same store can also
+// read local files during development. Remote schemes nobody is responsible for are
+// not registered, so they are rejected clearly as unsupported.
 func NewStore(handlers ...Handler) *Router {
 	all := make([]Handler, 0, len(handlers)+2)
 	all = append(all, handlers...)
@@ -57,19 +58,19 @@ func NewStore(handlers ...Handler) *Router {
 	return NewRouter(all...)
 }
 
-// Schemes は登録済みのスキーム名を返します（フォールバックは含みません）。
-// 呼ぶたびに順序が変わらないよう、辞書順にそろえて返します。
+// Schemes returns the registered scheme names (the fallback is not included).
+// They are returned in lexical order so the order does not change between calls.
 func (r *Router) Schemes() []string {
 	return slices.Sorted(maps.Keys(r.handlers))
 }
 
-// resolve は uri を担当するハンドラを返します。
-// 未対応であることの判定はここ 1 箇所だけです。
+// resolve returns the handler responsible for uri.
+// This is the only place that decides a scheme is unsupported.
 func (r *Router) resolve(uri string) (Handler, error) {
 	scheme := Scheme(uri)
 	if scheme == "" {
 		if r.fallback == nil {
-			return nil, fmt.Errorf("%w: ローカルパスを扱うハンドラが登録されていません (%s)", ErrUnsupportedScheme, uri)
+			return nil, fmt.Errorf("%w: no handler registered for local paths (%s)", ErrUnsupportedScheme, uri)
 		}
 		return r.fallback, nil
 	}
@@ -80,24 +81,24 @@ func (r *Router) resolve(uri string) (Handler, error) {
 	return handler, nil
 }
 
-// Open は指定されたパスに対応する読み取りストリームを返します。
+// Open returns a read stream for the given path.
 func (r *Router) Open(ctx context.Context, name string) (io.ReadCloser, error) {
 	return r.dispatch(name, func(h Handler) (io.ReadCloser, error) {
 		return h.Open(ctx, name)
 	})
 }
 
-// Stat は指定されたパスのメタデータを返します。
+// Stat returns the metadata of the given path.
 func (r *Router) Stat(ctx context.Context, name string) (ObjectInfo, error) {
 	return r.dispatch(name, func(h Handler) (ObjectInfo, error) {
 		return h.Stat(ctx, name)
 	})
 }
 
-// Exists は指定されたパスにオブジェクトが存在するかを返します。
+// Exists reports whether an object exists at the given path.
 //
-// Handler に Exists を持たせず Stat から導出するのは、実装ごとに
-// 「不在を (false, nil) で返す」約束を取り違える余地を消すためです。
+// Handler does not have Exists and it is derived from Stat instead, to remove the
+// room for each implementation to get the "absence returns (false, nil)" promise wrong.
 func (r *Router) Exists(ctx context.Context, name string) (bool, error) {
 	if _, err := r.Stat(ctx, name); err != nil {
 		if errors.Is(err, ErrNotExist) {
@@ -108,10 +109,10 @@ func (r *Router) Exists(ctx context.Context, name string) (bool, error) {
 	return true, nil
 }
 
-// List は指定されたパス配下を列挙します。
+// List enumerates what is under the given path.
 //
-// 何も無いプレフィックスはエラーではなく空で返り、区切り文字を渡さない場合は配下を
-// 再帰的に返します。詳しくは Store.List を参照してください。
+// A prefix with nothing under it returns empty rather than an error, and without a
+// delimiter everything below is returned recursively. See Store.List for details.
 func (r *Router) List(ctx context.Context, name string, opts ...ListOption) iter.Seq2[Entry, error] {
 	handler, err := r.resolve(name)
 	if err != nil {
@@ -120,7 +121,7 @@ func (r *Router) List(ctx context.Context, name string, opts ...ListOption) iter
 	return handler.List(ctx, ListPrefix(name), newListOptions(opts...))
 }
 
-// Write は指定されたパスへデータを書き込みます。
+// Write writes data to the given path.
 func (r *Router) Write(ctx context.Context, name string, src io.Reader, opts ...WriteOption) error {
 	handler, err := r.resolve(name)
 	if err != nil {
@@ -129,7 +130,7 @@ func (r *Router) Write(ctx context.Context, name string, src io.Reader, opts ...
 	return handler.Write(ctx, name, src, newWriteOptions(opts...))
 }
 
-// Delete は指定されたパスのリソースを削除します。
+// Delete removes the resource at the given path.
 func (r *Router) Delete(ctx context.Context, name string) error {
 	handler, err := r.resolve(name)
 	if err != nil {
@@ -138,18 +139,19 @@ func (r *Router) Delete(ctx context.Context, name string) error {
 	return handler.Delete(ctx, name)
 }
 
-// Copy は src の内容を dst へ複製します。
+// Copy duplicates the contents of src into dst.
 //
-// 両者が同じハンドラに解決され、そのハンドラが Copier を実装していれば
-// サーバーサイドコピーへ落とします。それ以外はストリームで中継します。
+// When both resolve to the same handler and that handler implements Copier, it falls
+// through to a server-side copy. Otherwise it relays a stream.
 //
-// WriteOption を渡した場合は、必ずストリーム中継になります。CopyTo は
-// オプションを受け取らないので、サーバーサイドコピーへ落とすと指定が黙って
-// 消えるためです（WithIfNotExists を付けたのに上書きされる、など）。
+// With a WriteOption it always relays a stream. CopyTo takes no options, so falling
+// through to a server-side copy would silently drop them (WithIfNotExists given, yet
+// the target is overwritten, and so on).
 //
-// どちらの経路でも、コピー元の Content-Type とユーザー定義メタデータは引き継ぎます。
-// サーバーサイドコピーは元の属性を保つのに、ストリーム中継だけが既定の Content-Type で
-// 書き直すと、同じ Copy がスキームの組み合わせで別の結果になります。
+// On either path, the source's Content-Type and user-defined metadata are carried
+// over. A server-side copy keeps the original attributes, so if only the stream relay
+// rewrote them with the default Content-Type, the same Copy would give different
+// results depending on the scheme pair.
 func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption) error {
 	srcHandler, err := r.resolve(src)
 	if err != nil {
@@ -160,20 +162,20 @@ func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption)
 		return err
 	}
 
-	// 同一スキームかどうかで判定します。ハンドラ値そのものの比較は、
-	// 比較不可能な型を内包していると panic するため使いません。
+	// Decide by whether the scheme is the same. Comparing the handler values themselves
+	// is not used because it panics when they contain an incomparable type.
 	if len(opts) == 0 && srcHandler.Scheme() == dstHandler.Scheme() {
 		if copier, ok := srcHandler.(Copier); ok {
 			err := copier.CopyTo(ctx, src, dst)
-			// ErrNotSupported だけはストリーム中継へ落とします。サーバーサイド
-			// コピーの可否は対象によって変わることがあり（S3 の CopyObject は
-			// 5GB を超えると使えません）、実装がそれを実行時に伝えられないと、
-			// 呼び出し側が「大きいときだけ別の書き方」を持つことになります。
+			// Only ErrNotSupported falls back to the stream relay. Whether a server-side copy
+			// is possible can depend on the target (S3's CopyObject cannot be used above 5GB),
+			// and if implementations could not report that at run time, callers would have to
+			// carry "a different way of writing it, only when large".
 			if err == nil {
 				return nil
 			}
 			if !errors.Is(err, ErrNotSupported) {
-				return wrapf(err, "コピーに失敗しました (%s -> %s)", src, dst)
+				return wrapf(err, "copy (%s -> %s)", src, dst)
 			}
 		}
 	}
@@ -183,25 +185,25 @@ func (r *Router) Copy(ctx context.Context, src, dst string, opts ...WriteOption)
 
 	rc, err := srcHandler.Open(ctx, src)
 	if err != nil {
-		return wrapf(err, "コピー元のオープンに失敗しました (%s)", src)
+		return wrapf(err, "open copy source (%s)", src)
 	}
 	defer func() { _ = rc.Close() }()
 
 	if err := dstHandler.Write(ctx, dst, rc, writeOpts); err != nil {
-		return wrapf(err, "コピー先への書き込みに失敗しました (%s -> %s)", src, dst)
+		return wrapf(err, "write copy destination (%s -> %s)", src, dst)
 	}
 	return nil
 }
 
-// carrySourceAttributes は、呼び出し側が指定しなかった Content-Type とメタデータを
-// コピー元から引き継ぎます。
+// carrySourceAttributes carries over from the source the Content-Type and metadata the
+// caller did not specify.
 //
-// Stat の 1 往復が増えますが、これが無いとストリーム中継のコピーは元の Content-Type を
-// 既定値で塗り潰します（画像を複製したら text/plain になる）。Stat に失敗した場合は
-// 引き継ぎを諦めるだけで、コピー自体は続けます。属性の欠落でコピーを失敗させるのは、
-// 呼び出し側の依頼に対して過剰だからです。
+// It adds one Stat round trip, but without it a stream-relayed copy paints over the
+// original Content-Type with the default (duplicating an image yields text/plain).
+// When Stat fails it just gives up carrying them over and continues the copy itself:
+// failing the copy over missing attributes would be more than the caller asked for.
 func carrySourceAttributes(ctx context.Context, h Handler, src string, o *WriteOptions) {
-	// 呼び出し側が明示したかどうかは、オプション無しの既定値と比べて判断します。
+	// Whether the caller set a value explicitly is decided by comparing with the defaults with no options.
 	defaults := newWriteOptions()
 	needType := o.ContentType == defaults.ContentType
 	needMeta := len(o.Metadata) == 0
@@ -221,7 +223,7 @@ func carrySourceAttributes(ctx context.Context, h Handler, src string, o *WriteO
 	}
 }
 
-// SignURL は署名付き URL を生成します。
+// SignURL generates a signed URL.
 func (r *Router) SignURL(ctx context.Context, name, method string, expires time.Duration) (string, error) {
 	handler, err := r.resolve(name)
 	if err != nil {
@@ -229,22 +231,22 @@ func (r *Router) SignURL(ctx context.Context, name, method string, expires time.
 	}
 	signer, ok := handler.(Signer)
 	if !ok {
-		return "", fmt.Errorf("%w: 署名付きURL (%s)", ErrNotSupported, name)
+		return "", fmt.Errorf("%w: signed URL (%s)", ErrNotSupported, name)
 	}
 	return signer.SignURL(ctx, name, method, expires)
 }
 
-// Sub は、プレフィックスに固定されたストアを返します。
+// Sub returns a store pinned to the prefix.
 func (r *Router) Sub(prefix string) Store {
 	return Sub(r, prefix)
 }
 
-// Sub は、任意の Store をプレフィックスに固定したストアを返します。
+// Sub returns a store that pins any Store to the prefix.
 //
-// Store を包んで振る舞いを足す型（呼び出しを記録するテストのフェイクなど）は、
-// Sub メソッドをこの関数へ委譲してください。埋め込みから昇格した Sub は
-// 埋め込まれた側をスコープの土台にするため、包んだ側の振る舞いが
-// スコープの先で失われます。
+// Types that wrap a Store to add behaviour (such as test fakes that record calls)
+// should delegate their Sub method to this function. A Sub promoted from an embedded
+// field uses the embedded value as the base of the scope, so the wrapper's behaviour
+// is lost beyond the scope.
 //
 //	func (d *decorator) Sub(prefix string) remoteio.Store {
 //		return remoteio.Sub(d, prefix)
@@ -253,11 +255,11 @@ func Sub(store Store, prefix string) Store {
 	return &scopedStore{root: store, prefix: prefix}
 }
 
-// dispatch は、ハンドラを解決して値を返す操作へ委譲します。
-// 解決に失敗したときの戻り値をゼロ値で揃えるためだけの補助です。
+// dispatch resolves the handler and delegates to an operation that returns a value.
+// It exists only to make the return value on a resolution failure a uniform zero value.
 //
-// メソッドが型パラメータを持てるため、レシーバを第 1 引数で受け取る関数にせず
-// メソッドとして書けます。
+// Because methods can have type parameters, it can be written as a method rather
+// than a function taking the receiver as its first argument.
 func (r *Router) dispatch[T any](uri string, fn func(Handler) (T, error)) (T, error) {
 	handler, err := r.resolve(uri)
 	if err != nil {
@@ -267,46 +269,47 @@ func (r *Router) dispatch[T any](uri string, fn func(Handler) (T, error)) (T, er
 	return fn(handler)
 }
 
-// errSeq は、反復を始める前に失敗したことを 1 度だけ伝える反復子を返します。
+// errSeq returns an iterator that reports, once, a failure before iteration started.
 func errSeq(err error) iter.Seq2[Entry, error] {
 	return func(yield func(Entry, error) bool) { yield(Entry{}, err) }
 }
 
-// scopedStore は、プレフィックスに固定された Store です。
+// scopedStore is a Store pinned to a prefix.
 //
-// 呼び出しのたびにバケット名を連れ回す代わりに、組み立て時に一度だけ決めます。
-// これが無いと、利用側は「バケット名 + パス」から URI を組む薄いメソッドを
-// リポジトリごとに書き直すことになります。実際そうなっており、それでも足りずに
-// "gs://" を直書きする箇所が利用側に多数ありました。
+// Instead of carrying the bucket name into every call, it is decided once at assembly
+// time. Without it, consumers rewrite a thin method building a URI from "bucket name +
+// path" in every repository. That is what happened, and even that was not enough:
+// consumers hard-coded "gs://" in many places.
 type scopedStore struct {
-	// root は Store インターフェースです。具象の Router に固定すると、
-	// Store を包んだ型が Sub を経た瞬間に素通しされます。
+	// root is the Store interface. Pinning it to the concrete Router would let a type
+	// wrapping a Store be bypassed the moment it goes through Sub.
 	root   Store
 	prefix string
 }
 
 var _ Store = (*scopedStore)(nil)
 
-// resolveName は相対名をスコープ内の完全なパスへ変換します。
+// resolveName converts a relative name into a full path within the scope.
 //
-// スキーム付きの絶対 URI を弾くのは、スコープを絞ったつもりのコードが
-// 別のバケットへ書けてしまうのを防ぐためです。
+// Absolute URIs with a scheme are rejected to keep code that thinks it narrowed its
+// scope from writing to another bucket.
 func (s *scopedStore) resolveName(name string) (string, error) {
 	if Scheme(name) != "" {
-		return "", fmt.Errorf("%w: %s (スコープ: %s)", ErrAbsoluteName, name, s.prefix)
+		return "", fmt.Errorf("%w: %s (scope: %s)", ErrAbsoluteName, name, s.prefix)
 	}
 	if hasRelativeSegment(name) {
-		return "", fmt.Errorf("%w: 相対セグメントを含む名前です: %s (スコープ: %s)", ErrInvalidURI, name, s.prefix)
+		return "", fmt.Errorf("%w: name contains a relative segment: %s (scope: %s)", ErrInvalidURI, name, s.prefix)
 	}
 	return Join(s.prefix, name), nil
 }
 
-// hasRelativeSegment は、名前に "." または ".." のセグメントが含まれるかを返します。
+// hasRelativeSegment reports whether a name contains a "." or ".." segment.
 //
-// ローカルの Join は filepath.Join なので ".." を畳んでスコープの外を指せます
-// （ErrAbsoluteName が防ごうとしている「別の場所へ書ける」がそのまま起きます）。
-// リモートではスコープを抜けませんが、gs://b/jobs/../x.txt というリテラルのキーが
-// でき、同じ呼び出しがスキームによって別の意味になります。両方まとめて拒否します。
+// The local Join is filepath.Join, which folds ".." and can point outside the scope
+// (exactly the "can write somewhere else" that ErrAbsoluteName is meant to prevent).
+// Remotely the scope is not escaped, but a literal key gs://b/jobs/../x.txt is
+// created, and the same call means different things per scheme. Both are rejected
+// together.
 func hasRelativeSegment(name string) bool {
 	for segment := range strings.SplitSeq(strings.ReplaceAll(name, `\`, "/"), "/") {
 		if segment == "." || segment == ".." {
@@ -384,7 +387,7 @@ func (s *scopedStore) SignURL(ctx context.Context, name, method string, expires 
 	return s.root.SignURL(ctx, full, method, expires)
 }
 
-// Sub はスコープをさらに絞ったストアを返します。
+// Sub returns a store with the scope narrowed further.
 func (s *scopedStore) Sub(prefix string) Store {
 	return Sub(s.root, Join(s.prefix, prefix))
 }

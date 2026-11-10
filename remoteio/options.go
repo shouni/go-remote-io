@@ -5,37 +5,37 @@ import (
 	"mime"
 )
 
-// DefaultContentType は、Content-Type が指定されなかった場合に使用される既定値です。
+// DefaultContentType is the default used when no Content-Type is given.
 const DefaultContentType = "text/plain; charset=utf-8"
 
-// ListOptions は ListOption を解決した結果で、Handler.List が受け取ります。
+// ListOptions is the result of resolving ListOption values, and is what Handler.List receives.
 //
-// 解決関数を公開していないのは、実装対象が Handler 1 本に絞られているためです。
-// 実装側は解決済みの値だけを受け取ります。
+// The resolver is not exported because the only thing to implement is Handler.
+// Implementations receive only resolved values.
 type ListOptions struct {
-	// Delimiter は階層の区切り文字です。
-	// 空文字ならプレフィックス配下を再帰的に列挙します。
-	// 指定すると直下のみが対象になり、畳まれた階層が IsPrefix の Entry として現れます。
+	// Delimiter is the hierarchy delimiter.
+	// When empty, everything under the prefix is listed recursively.
+	// When set, only direct children are listed, and folded hierarchies appear as Entry values with IsPrefix.
 	Delimiter string
 }
 
-// ListOption は List の挙動を変える Functional Option です。
+// ListOption is a functional option that changes how List behaves.
 type ListOption func(*ListOptions)
 
-// WithDelimiter は階層の区切り文字を指定し、プレフィックス直下のみを対象にします。
+// WithDelimiter sets the hierarchy delimiter and limits the listing to the prefix's direct children.
 //
-// 指定すると、直下のオブジェクトに加えて「疑似ディレクトリ」が列挙されます。
-// 疑似ディレクトリは IsPrefix が真の Entry として渡るため、呼び出し側は
-// 末尾の文字を見て判定する必要がありません。
+// With it, "pseudo-directories" are listed in addition to the direct child objects.
+// Pseudo-directories arrive as Entry values with IsPrefix true, so the caller does
+// not need to look at the trailing character.
 //
-// これが要るのはジョブ ID の一覧のような場面です。区切り文字なしでは配下の
-// 全オブジェクトが返るため、1 ジョブに 3 つ成果物があれば 3 倍のデータを受け取って
-// 呼び出し側で重複を潰すことになります。区切り文字はその走査をサーバー側へ寄せます。
+// This is what a list of job IDs needs. Without a delimiter every object below is
+// returned, so with 3 artifacts per job the caller receives 3 times the data and
+// deduplicates it itself. The delimiter moves that walk to the server.
 func WithDelimiter(delimiter string) ListOption {
 	return func(o *ListOptions) { o.Delimiter = delimiter }
 }
 
-// newListOptions はオプションを畳み込んで設定を組み立てます。
+// newListOptions folds the options into settings.
 func newListOptions(opts ...ListOption) ListOptions {
 	var o ListOptions
 	for _, opt := range opts {
@@ -46,27 +46,27 @@ func newListOptions(opts ...ListOption) ListOptions {
 	return o
 }
 
-// WriteOptions は WriteOption を解決した結果で、Handler.Write が受け取ります。
+// WriteOptions is the result of resolving WriteOption values, and is what Handler.Write receives.
 type WriteOptions struct {
-	// ContentType は書き込むオブジェクトの MIME タイプです。空なら DefaultContentType。
+	// ContentType is the MIME type of the object to write. Empty means DefaultContentType.
 	ContentType string
-	// CacheControl は Cache-Control ヘッダーです。空なら設定しません。
+	// CacheControl is the Cache-Control header. Empty means it is not set.
 	CacheControl string
-	// ContentDisposition は Content-Disposition ヘッダーです。空なら設定しません。
+	// ContentDisposition is the Content-Disposition header. Empty means it is not set.
 	ContentDisposition string
-	// Metadata は任意のユーザー定義メタデータです。空なら設定しません。
-	// ローカルファイルシステムでは保存されず、無視されます。
+	// Metadata is arbitrary user-defined metadata. Empty means it is not set.
+	// On the local file system it is not stored and is ignored.
 	Metadata map[string]string
-	// IfNotExists は、対象が存在しない場合にのみ書き込むことを指示します。
-	// 既に存在した場合、Write は ErrExist を含むエラーを返します。
+	// IfNotExists says to write only when the target does not exist.
+	// If it already exists, Write returns an error containing ErrExist.
 	IfNotExists bool
 }
 
-// WriteOption は Write の挙動を変える Functional Option です。
+// WriteOption is a functional option that changes how Write behaves.
 type WriteOption func(*WriteOptions)
 
-// newWriteOptions はオプションを畳み込んで設定を組み立てます。
-// Content-Type が空の場合は DefaultContentType で補います。
+// newWriteOptions folds the options into settings.
+// An empty Content-Type is filled in with DefaultContentType.
 func newWriteOptions(opts ...WriteOption) WriteOptions {
 	o := WriteOptions{ContentType: DefaultContentType}
 	for _, opt := range opts {
@@ -74,26 +74,26 @@ func newWriteOptions(opts ...WriteOption) WriteOptions {
 			opt(&o)
 		}
 	}
-	// 明示的に空文字が渡された場合のフォールバックを一元管理します。
+	// Handle the fallback for an explicitly passed empty string in one place.
 	if o.ContentType == "" {
 		o.ContentType = DefaultContentType
 	}
 	return o
 }
 
-// WithContentType は MIME タイプを指定します。
+// WithContentType sets the MIME type.
 func WithContentType(contentType string) WriteOption {
 	return func(o *WriteOptions) { o.ContentType = contentType }
 }
 
-// WithCacheControl は Cache-Control ヘッダーを指定します。
+// WithCacheControl sets the Cache-Control header.
 func WithCacheControl(cacheControl string) WriteOption {
 	return func(o *WriteOptions) { o.CacheControl = cacheControl }
 }
 
-// WithMetadata はユーザー定義メタデータを指定します。
-// 複数回渡した場合は積み上がります（同じキーは後勝ち）。
-// ローカル書き込みでは Content-Type などと同じく黙って無視されます。
+// WithMetadata sets user-defined metadata.
+// Passing it several times accumulates (the last value wins for the same key).
+// Local writes silently ignore it, like Content-Type and the rest.
 func WithMetadata(metadata map[string]string) WriteOption {
 	return func(o *WriteOptions) {
 		if len(metadata) == 0 {
@@ -106,12 +106,12 @@ func WithMetadata(metadata map[string]string) WriteOption {
 	}
 }
 
-// WithInline はブラウザでのインライン再生を指示します。
+// WithInline asks for inline playback in the browser.
 func WithInline() WriteOption {
 	return func(o *WriteOptions) { o.ContentDisposition = "inline" }
 }
 
-// WithAttachment はダウンロードを強制し、ファイル名を指定します。
+// WithAttachment forces a download and sets the file name.
 func WithAttachment(filename string) WriteOption {
 	return func(o *WriteOptions) {
 		if filename == "" {
@@ -122,11 +122,11 @@ func WithAttachment(filename string) WriteOption {
 	}
 }
 
-// WithIfNotExists は、対象が存在しない場合にのみ書き込むことを指示します。
+// WithIfNotExists says to write only when the target does not exist.
 //
-// Exists で確かめてから Write する形は、その 2 呼び出しの間に他のプロセスが
-// 書き込めるため競合します。GCS の前提条件と S3 の If-None-Match をそのまま
-// 使えるようにして、判定をストレージ側へ寄せます。
+// Checking with Exists before Write races, because another process can write
+// between those two calls. GCS preconditions and S3's If-None-Match are used as is,
+// moving the decision to the storage side.
 func WithIfNotExists() WriteOption {
 	return func(o *WriteOptions) { o.IfNotExists = true }
 }

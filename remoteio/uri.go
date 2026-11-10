@@ -6,29 +6,30 @@ import (
 	"strings"
 )
 
-// スキームの語彙はここに集約します。
+// The scheme vocabulary is gathered here.
 //
-// 公開するのは区切りを含まない名前だけです。RFC 3986 でスキームと呼ぶのは "gs" の方で、
-// 区切りを足す操作はここに閉じ込めます。呼び出し側が "://" を自前で連結する必要は
-// ありません（連結を書かせると、足し忘れが "gsfoo://..." のような別スキームまで
-// 前方一致で拾う形で表に出ます）。
+// Only names without the separator are exported. What RFC 3986 calls the scheme is
+// "gs", and adding the separator is confined to this place. Callers never need to
+// concatenate "://" themselves (making them write the concatenation surfaces a
+// forgotten separator as a prefix match that also catches another scheme such as
+// "gsfoo://...").
 const (
-	// SchemeGCS は Google Cloud Storage のスキーム名です。
+	// SchemeGCS is the scheme name of Google Cloud Storage.
 	SchemeGCS = "gs"
-	// SchemeS3 は Amazon S3 のスキーム名です。
+	// SchemeS3 is the scheme name of Amazon S3.
 	SchemeS3 = "s3"
-	// SchemeFile は file:// のスキーム名です。
+	// SchemeFile is the scheme name of file://.
 	SchemeFile = "file"
 
-	// schemeSeparator は URI のスキームと本体の区切りです。
+	// schemeSeparator separates a URI's scheme from its body.
 	schemeSeparator = "://"
 )
 
-// Scheme は URI からスキーム名 ("gs" など) を取り出します。
-// スキームを持たない文字列（ローカルパス）では空文字を返します。
+// Scheme extracts the scheme name ("gs" and so on) from a URI.
+// It returns the empty string for a string without a scheme (a local path).
 //
-// 判定は "://" の有無だけで行うため、"mailto:" のように二重スラッシュを持たない
-// URI はローカルパスとして扱われます。
+// The decision is made only by the presence of "://", so URIs without a double
+// slash, such as "mailto:", are treated as local paths.
 func Scheme(uri string) string {
 	i := strings.Index(uri, schemeSeparator)
 	if i <= 0 {
@@ -37,16 +38,16 @@ func Scheme(uri string) string {
 	return uri[:i]
 }
 
-// HasScheme は uri が指定スキームかどうかを返します。
+// HasScheme reports whether uri has the given scheme.
 //
-// strings.HasPrefix(uri, "gs") のような素の前方一致だと "gsfoo://..." まで拾って
-// しまうため、判定はこの関数を通してください。
+// A bare prefix match such as strings.HasPrefix(uri, "gs") also catches
+// "gsfoo://...", so go through this function for the check.
 func HasScheme(uri, scheme string) bool {
 	return Scheme(uri) == scheme
 }
 
-// BuildURI は、スキーム名・バケット名・オブジェクトパスから URI を組み立てます。
-// scheme は区切りを含まない名前 ("gs") で渡します。
+// BuildURI builds a URI from a scheme name, a bucket name and an object path.
+// Pass scheme as the name without the separator ("gs").
 func BuildURI(scheme, bucket, object string) string {
 	uri := scheme + schemeSeparator + bucket
 	if object = strings.TrimPrefix(object, "/"); object != "" {
@@ -55,87 +56,88 @@ func BuildURI(scheme, bucket, object string) string {
 	return uri
 }
 
-// ParseURI は、スキームを問わず「スキーム + バケット + オブジェクトパス」形式の
-// URI を分解します。オブジェクトパスは空でも構いません
-// （gs://bucket は ("gs", "bucket", "") を返します）。
+// ParseURI splits a URI of the form "scheme + bucket + object path", whatever the
+// scheme. The object path may be empty
+// (gs://bucket returns ("gs", "bucket", "")).
 //
-// スキームを固定しないのは、Handler と Router がスキーム非依存に作られているためです。
-// ここが gs:// と s3:// を直書きしていると、第三者が新しいスキームのハンドラを
-// 書いたときに URI の分解だけ自前で再実装することになり、
-// 「どこからがバケット名か」の解釈がこの関数とずれます。
+// The scheme is not fixed because Handler and Router are built scheme-independent.
+// If this hard-coded gs:// and s3://, a third party writing a handler for a new
+// scheme would reimplement just the URI splitting, and its reading of "where the
+// bucket name begins" would drift from this function.
 func ParseURI(uri string) (scheme, bucket, object string, err error) {
 	scheme = Scheme(uri)
 	if scheme == "" {
-		return "", "", "", fmt.Errorf("%w: スキームがありません (%s)", ErrInvalidURI, uri)
+		return "", "", "", fmt.Errorf("%w: no scheme (%s)", ErrInvalidURI, uri)
 	}
 
 	body := uri[len(scheme)+len(schemeSeparator):]
 	bucket, object, _ = strings.Cut(body, "/")
 	if bucket == "" {
-		return "", "", "", fmt.Errorf("%w: バケット名が空です (%s)", ErrInvalidURI, uri)
+		return "", "", "", fmt.Errorf("%w: empty bucket name (%s)", ErrInvalidURI, uri)
 	}
 	return scheme, bucket, object, nil
 }
 
-// ParseBucketURI は、URI が指定スキームであることを確かめた上で
-// バケット名とオブジェクトパスを返します。パスは空でも構いません（一覧向け）。
+// ParseBucketURI checks that the URI has the given scheme and then returns the
+// bucket name and the object path. The path may be empty (for listings).
 //
-// ハンドラの実装が担当外のスキームを受け取ったまま処理してしまうのを防ぎます。
-// Router 経由なら振り分けの時点で弾かれますが、ハンドラは公開されているため
-// 直接呼ばれる余地があります。
+// It keeps a handler implementation from processing a scheme it is not responsible
+// for. Through Router such URIs are filtered out at dispatch, but handlers are
+// exported and can be called directly.
 func ParseBucketURI(scheme, uri string) (bucket, object string, err error) {
 	got, bucket, object, err := ParseURI(uri)
 	if err != nil {
 		return "", "", err
 	}
 	if got != scheme {
-		return "", "", fmt.Errorf("%w: スキームが一致しません (期待: %s, 実際: %s)", ErrInvalidURI, scheme, uri)
+		return "", "", fmt.Errorf("%w: scheme mismatch (want: %s, got: %s)", ErrInvalidURI, scheme, uri)
 	}
 	return bucket, object, nil
 }
 
-// ParseObjectURI は ParseBucketURI に加えて、オブジェクト名が空でないことを検証します。
+// ParseObjectURI does what ParseBucketURI does and also checks that the object name is not empty.
 //
-// オブジェクト名が空の URI (gs://bucket など) を拒否するのは、バケット操作と
-// 取り違えたり、不在なのか URI が不正なのか区別できなくなるのを防ぐためです。
+// URIs with an empty object name (gs://bucket and the like) are rejected to prevent
+// confusing them with bucket operations, and being unable to tell "not there" from
+// "invalid URI".
 func ParseObjectURI(scheme, uri string) (bucket, object string, err error) {
 	bucket, object, err = ParseBucketURI(scheme, uri)
 	if err != nil {
 		return "", "", err
 	}
 	if object == "" {
-		return "", "", fmt.Errorf("%w: オブジェクト名が空です (%s)", ErrInvalidURI, uri)
+		return "", "", fmt.Errorf("%w: empty object name (%s)", ErrInvalidURI, uri)
 	}
 	return bucket, object, nil
 }
 
-// NormalizeBucketName は、バケット「名」として受け取った値の表記ゆれを整えます。
-// 前後の空白、既知のスキームプレフィックス、前後のスラッシュを落とします。
+// NormalizeBucketName tidies up variations in a value received as a bucket "name".
+// It drops surrounding whitespace, known scheme prefixes and leading/trailing slashes.
 //
-// 設定から読んだバケット名を BuildURI や Store.Sub へ渡す前に一度だけ通すことを
-// 想定しています。素通しすると `gs://gs://my-bucket//path` のような URI ができ、
-// 失敗するのは書き込みの時点になります。
+// It is meant to be applied once to a bucket name read from configuration before it
+// is passed to BuildURI or Store.Sub. Passed through as is, it produces URIs like
+// `gs://gs://my-bucket//path`, which fail only at write time.
 func NormalizeBucketName(bucket string) string {
 	bucket = strings.TrimSpace(bucket)
-	// スキームの直書きを増やさないよう、既知の語彙から導出したプレフィックスで落とします。
+	// Drop them by prefixes derived from the known vocabulary, so as not to add more hard-coded schemes.
 	for _, scheme := range []string{SchemeGCS, SchemeS3, SchemeFile} {
 		bucket = strings.TrimPrefix(bucket, scheme+schemeSeparator)
 	}
 	return strings.Trim(bucket, "/")
 }
 
-// ListPrefix は、一覧のプレフィックスを「ディレクトリの中身」を指す形へ正規化します。
-// 既に区切りで終わっている場合と、バケット直下 (gs://bucket) の場合はそのまま返します。
+// ListPrefix normalizes a listing prefix to the form that means "the contents of a directory".
+// It returns the prefix as is when it already ends with the separator, or when it is the bucket root (gs://bucket).
 //
-// 常に正規化するのは、そうしないと同じ呼び出しがスキームによって別の意味になるためです。
-// 正規化しなければ GCS / S3 では素の前方一致（`data` が `data-archive/` にも当たる）、
-// ローカルはディレクトリ走査になります。
-// Router が振り分け前に通しますが、ハンドラを直接呼ぶ場合のために公開しています。
+// It always normalizes, because otherwise the same call would mean different things
+// per scheme: without normalization, GCS / S3 do a bare prefix match (`data` also
+// hits `data-archive/`) while local walks a directory.
+// Router applies it before dispatch, but it is exported for calling handlers directly.
 func ListPrefix(uri string) string {
 	if uri == "" || strings.HasSuffix(uri, "/") {
 		return uri
 	}
-	// gs://bucket はバケット直下を指すため、そのままで既に「中身」の意味になります。
+	// gs://bucket points at the bucket root, so as is it already means "the contents".
 	if scheme := Scheme(uri); scheme != "" {
 		if !strings.Contains(uri[len(scheme)+len(schemeSeparator):], "/") {
 			return uri
@@ -144,13 +146,13 @@ func ListPrefix(uri string) string {
 	return uri + "/"
 }
 
-// Dir は、パスや URI から親ディレクトリを取り出し、末尾が区切りで終わる形に整えます。
+// Dir extracts the parent directory from a path or URI, ending with the separator.
 //
-// リモート URI を net/url で扱わないのは、gs:// / s3:// が URL ではないためです。
-// オブジェクト名は任意のバイト列で、空白も ? も正当な文字ですが、URL として
-// 組み直すとそれぞれ %20 とクエリ区切りに化けます。ParseURI はデコードしないため、
-// 化けた URI はエラーにならずに別のキーを指してしまいます。
-// 同じ理由で filepath.Dir もリモート URI には使いません（Windows でセパレータが混ざります）。
+// Remote URIs are not handled with net/url because gs:// / s3:// are not URLs. An
+// object name is an arbitrary byte sequence, and spaces and ? are valid characters,
+// but rebuilt as a URL they turn into %20 and a query separator. ParseURI does not
+// decode, so a mangled URI points at a different key without an error.
+// For the same reason filepath.Dir is not used for remote URIs either (separators get mixed on Windows).
 func Dir(uri string) string {
 	if uri == "" {
 		return ""
@@ -164,7 +166,7 @@ func Dir(uri string) string {
 		if before, _, ok := strings.CutLast(body, "/"); ok {
 			return uri[:len(scheme)+len(schemeSeparator)] + before + "/"
 		}
-		// gs://bucket のようにキーを持たない URI。バケット直下を指します。
+		// A URI without a key, such as gs://bucket. It points at the bucket root.
 		return uri + "/"
 	}
 
@@ -178,12 +180,12 @@ func Dir(uri string) string {
 	return baseDir
 }
 
-// Join は、ベースとなるパスや URI に名前を繋げます。
+// Join appends a name to a base path or URI.
 //
-// スキーム付きなら "/" で、それ以外はローカルパスとして結合します。
-// リモート側で filepath.Join も url.JoinPath も使わないのは、前者が連続するスラッシュを
-// 畳んで `gs://bucket/a` を `gs:/bucket/a` に化けさせ、後者がオブジェクト名を
-// パーセントエンコードしてしまうためです（Dir のコメント参照）。
+// With a scheme it joins with "/", otherwise it joins as a local path.
+// Neither filepath.Join nor url.JoinPath is used on the remote side: the former folds
+// consecutive slashes and turns `gs://bucket/a` into `gs:/bucket/a`, and the latter
+// percent-encodes the object name (see the comment on Dir).
 func Join(base, name string) string {
 	if Scheme(base) == "" && base != "" {
 		return filepath.Join(base, name)
@@ -198,15 +200,15 @@ func Join(base, name string) string {
 	return base + "/" + name
 }
 
-// IndexedPath は、パスの拡張子の前に連番を挿入します。
-// 例: "path/to/image.png", 1 -> "path/to/image_1.png"
+// IndexedPath inserts a sequence number before the path's extension.
+// Example: "path/to/image.png", 1 -> "path/to/image_1.png"
 //
-// 拡張子は最後の区切りより後ろの最後の "." 以降を指します（filepath.Ext と同じ）。
-// リモート URI もローカルパスも同じ規則で扱うため、"gs://b/dir.v2/name" のように
-// ディレクトリ側にだけ "." がある場合は拡張子なしとして扱われます。
+// The extension is what follows the last "." after the last separator (same as
+// filepath.Ext). Remote URIs and local paths follow the same rule, so when only the
+// directory part has a ".", as in "gs://b/dir.v2/name", there is no extension.
 func IndexedPath(base string, index int) (string, error) {
 	if index <= 0 {
-		return "", fmt.Errorf("%w: インデックスは1以上の整数である必要があります (%d)", ErrInvalidURI, index)
+		return "", fmt.Errorf("%w: index must be an integer of 1 or more (%d)", ErrInvalidURI, index)
 	}
 	ext := filepath.Ext(base)
 	return fmt.Sprintf("%s_%d%s", strings.TrimSuffix(base, ext), index, ext), nil

@@ -13,8 +13,8 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/gcs"
 )
 
-// newTestFactory は、フェイクのクライアントを注入したファクトリを返します。
-// WithClient を通るため、認証情報の無い環境でも走ります。
+// newTestFactory returns a factory with a fake client injected.
+// It goes through WithClient, so it runs even without credentials.
 func newTestFactory(t *testing.T) *gcs.ClientFactory {
 	t.Helper()
 
@@ -32,7 +32,7 @@ func TestFactoryAccessors(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
 
-	t.Run("Store は gs:// とローカルを扱う", func(t *testing.T) {
+	t.Run("Store handles gs:// and local paths", func(t *testing.T) {
 		store, err := factory.Store()
 		require.NoError(t, err)
 
@@ -45,23 +45,23 @@ func TestFactoryAccessors(t *testing.T) {
 		assert.ErrorIs(t, err, remoteio.ErrUnsupportedScheme)
 	})
 
-	t.Run("Handler は担当スキームを返す", func(t *testing.T) {
+	t.Run("Handler returns its scheme", func(t *testing.T) {
 		handler, err := factory.Handler()
 		require.NoError(t, err)
 		assert.Equal(t, gcs.Scheme, handler.Scheme())
-		assert.Equal(t, "gs", handler.Scheme(), "区切りを含まない RFC 3986 の形であること")
+		assert.Equal(t, "gs", handler.Scheme(), "must be the RFC 3986 form without the separator")
 	})
 }
 
 func TestFactoryClose(t *testing.T) {
 	factory := newTestFactory(t)
 
-	t.Run("WithClient のクライアントは閉じない", func(t *testing.T) {
+	t.Run("does not close a WithClient client", func(t *testing.T) {
 		require.NoError(t, factory.Close())
 
-		// 注入されたクライアントのライフサイクルは呼び出し元に残るため、
-		// ファクトリを閉じてもクライアント自体は生きています。
-		// ここで確かめるのは、ファクトリが参照を手放したことです。
+		// The lifecycle of an injected client stays with the caller, so the client
+		// itself is still alive after the factory is closed.
+		// What is checked here is that the factory dropped its reference.
 		_, err := factory.Store()
 		assert.ErrorIs(t, err, remoteio.ErrClosed)
 
@@ -69,22 +69,22 @@ func TestFactoryClose(t *testing.T) {
 		assert.ErrorIs(t, err, remoteio.ErrClosed)
 	})
 
-	t.Run("Close は冪等", func(t *testing.T) {
+	t.Run("Close is idempotent", func(t *testing.T) {
 		assert.NoError(t, factory.Close())
 	})
 }
 
-// Close と各アクセサが並行に呼ばれても安全であることの確認です。
-// クライアントのフィールドを無同期で nil にすると Close と読み出しが競合しますが、
-// 並行に触るテストが無いと -race を付けていても検出されません。
+// Checks that Close and each accessor are safe to call concurrently.
+// Setting the client field to nil without synchronization races Close against reads,
+// but without a test touching them concurrently, -race cannot detect it.
 func TestFactoryCloseIsRaceFree(t *testing.T) {
 	factory := newTestFactory(t)
 
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			// クローズ前後どちらでも良く、エラーになること自体は想定内です。
-			// ここで見ているのはデータ競合が起きないことです。
+			// Before or after Close are both fine, and an error is expected.
+			// What is checked here is that no data race occurs.
 			_, _ = factory.Store()
 			_, _ = factory.Handler()
 		})

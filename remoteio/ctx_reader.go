@@ -5,10 +5,10 @@ import (
 	"io"
 )
 
-// ctxReader は io.Copy の途中でも ctx のキャンセルを検知できるようにする io.Reader ラッパーです。
+// ctxReader is an io.Reader wrapper that lets ctx cancellation be noticed even in the middle of io.Copy.
 //
-// os.File への io.Copy は ctx を見ないため、大きなファイルを書いている最中に
-// キャンセルされても最後まで書き切ってしまいます。Read の都度キャンセルを確認します。
+// io.Copy into an os.File does not look at ctx, so a large file being written is
+// written to the end even after cancellation. Cancellation is checked on every Read.
 type ctxReader struct {
 	ctx context.Context
 	r   io.Reader

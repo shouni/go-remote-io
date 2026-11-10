@@ -1,13 +1,13 @@
-// Package memio は、インメモリの remoteio.Handler を提供します。
+// Package memio provides an in-memory remoteio.Handler.
 //
-// テストでリモートストレージの代わりに使うためのものです。docker も認証情報も
-// ネットワークも要らず、GCS / S3 のハンドラと同じ契約を満たします
-// （storetest.TestHandler を通しているのが根拠です）。
+// It is meant to stand in for remote storage in tests. It needs no docker,
+// credentials or network, and meets the same contract as the GCS / S3 handlers
+// (running it through storetest.TestHandler is the evidence).
 //
-// これが無かった頃は、利用側の各リポジトリが Open / List / Write のフェイクを
-// 手書きしていました。エコシステム全体で 21 のテストファイルに 72 のフェイクメソッドが
-// あり、区切り文字による疑似ディレクトリの畳み込みをそれぞれ再実装していました。
-// 本物とずれても CI は緑のままになる、という状態です。
+// Before it existed, every consuming repository hand-wrote fakes for Open / List /
+// Write. Across the ecosystem there were 72 fake methods in 21 test files, each
+// reimplementing the folding of pseudo-directories by delimiter — a state in which CI
+// stays green even when they drift from the real thing.
 package memio
 
 import (
@@ -25,29 +25,29 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// DefaultScheme は、スキームを指定しなかった場合に担当するスキーム名です。
+// DefaultScheme is the scheme name handled when none is specified.
 const DefaultScheme = "mem"
 
-// Handler はインメモリの remoteio.Handler です。
-// サーバーサイドコピー (remoteio.Copier) も実装します。
+// Handler is an in-memory remoteio.Handler.
+// It also implements server-side copy (remoteio.Copier).
 //
-// 並行に使っても安全です。実装がリモートの代わりである以上、
-// 呼び出し側が並行に叩くテストを書けなければ意味がありません。
+// It is safe for concurrent use. Since it stands in for remote storage, it would be
+// pointless if callers could not write tests that hit it concurrently.
 type Handler struct {
 	scheme string
 
 	mu      sync.RWMutex
 	objects map[string]object
 
-	// failOn は、操作を意図的に失敗させるためのフックです。
-	// 「書き込みが途中で失敗したときに呼び出し側がどう振る舞うか」のような、
-	// 正常系では通らない経路を試すために置いています。
+	// failOn is a hook for making operations fail on purpose.
+	// It is there to exercise paths that the happy path never takes, such as "how does
+	// the caller behave when a write fails part-way".
 	failOn func(op, uri string) error
-	// now は時刻の供給元です。テストが更新時刻を固定できるようにしています。
+	// now is the source of time, so tests can pin modification times.
 	now func() time.Time
 }
 
-// object は保存された 1 件です。
+// object is one stored item.
 type object struct {
 	data               []byte
 	contentType        string
@@ -62,30 +62,30 @@ var (
 	_ remoteio.Copier  = (*Handler)(nil)
 )
 
-// Option は Handler の生成方法を変える Functional Option です。
+// Option is a functional option that changes how a Handler is created.
 type Option func(*Handler)
 
-// WithScheme は担当するスキーム名を指定します（既定は DefaultScheme）。
+// WithScheme sets the scheme name handled (DefaultScheme by default).
 //
-// gs や s3 を渡せば、そのスキームのハンドラとして振る舞います。
-// 利用側のテストが本番と同じ URI を書けるようにするためのものです。
+// Pass gs or s3 and it behaves as a handler for that scheme, so consumers' tests can
+// write the same URIs as production.
 func WithScheme(scheme string) Option {
 	return func(h *Handler) { h.scheme = scheme }
 }
 
-// WithFailure は、操作を意図的に失敗させるフックを登録します。
-// op は "open" / "stat" / "list" / "write" / "delete" / "copy" のいずれかです。
-// nil を返せば通常どおり処理します。
+// WithFailure registers a hook that makes operations fail on purpose.
+// op is one of "open" / "stat" / "list" / "write" / "delete" / "copy".
+// Returning nil processes the operation as usual.
 func WithFailure(fail func(op, uri string) error) Option {
 	return func(h *Handler) { h.failOn = fail }
 }
 
-// WithClock は時刻の供給元を差し替えます。更新時刻を検証するテスト向けです。
+// WithClock replaces the source of time. It is for tests that check modification times.
 func WithClock(now func() time.Time) Option {
 	return func(h *Handler) { h.now = now }
 }
 
-// New はインメモリのハンドラを返します。
+// New returns an in-memory handler.
 func New(opts ...Option) *Handler {
 	h := &Handler{
 		scheme:  DefaultScheme,
@@ -100,14 +100,14 @@ func New(opts ...Option) *Handler {
 	return h
 }
 
-// Scheme は担当するスキーム名を返します。
+// Scheme returns the scheme name handled.
 func (h *Handler) Scheme() string { return h.scheme }
 
-// Seed は、Write を通さずに内容を流し込みます。
-// テストの前提を組み立てるためのもので、WithFailure の影響を受けません。
+// Seed loads contents without going through Write.
+// It is for setting up test preconditions, and is not affected by WithFailure.
 //
-// メタデータまで指定したい場合は Write を使ってください。前提の組み立てで
-// 要るのはほぼ内容だけなので、ここは引数を増やしていません。
+// Use Write when metadata is needed too. Setting up preconditions almost always needs
+// only the contents, so no arguments were added here.
 func (h *Handler) Seed(uri string, data []byte) error {
 	bucket, key, err := h.parseObject(uri)
 	if err != nil {
@@ -122,8 +122,8 @@ func (h *Handler) Seed(uri string, data []byte) error {
 	return nil
 }
 
-// URIs は保存されている全オブジェクトの URI を辞書順で返します。
-// 「どこへ書かれたか」をテストで確かめるためのものです。
+// URIs returns the URIs of all stored objects in lexical order.
+// It is for checking in tests "where things were written".
 func (h *Handler) URIs() []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -137,13 +137,12 @@ func (h *Handler) URIs() []string {
 	return out
 }
 
-// Options は、保存時に解決された WriteOptions を返します。
+// Options returns the WriteOptions resolved when the object was stored.
 //
-// Content-Type や Cache-Control が意図どおり渡ったかを確かめるためのものです。
-// ObjectInfo に載るのは Content-Type と Metadata だけで、Cache-Control や
-// Content-Disposition は抽象の外から観測できません。利用側がそれを検証するために
-// 「最後に渡された設定」を自前で持つフェイクを書いていたので、
-// ここで受け持ちます。
+// It is for checking that Content-Type and Cache-Control were passed as intended.
+// Only Content-Type and Metadata appear on ObjectInfo; Cache-Control and
+// Content-Disposition cannot be observed from outside the abstraction. Consumers wrote
+// fakes that kept "the last settings passed" to verify them, so this takes that on.
 func (h *Handler) Options(uri string) (remoteio.WriteOptions, bool) {
 	bucket, key, err := h.parseObject(uri)
 	if err != nil {
@@ -165,14 +164,14 @@ func (h *Handler) Options(uri string) (remoteio.WriteOptions, bool) {
 	}, true
 }
 
-// Len は保存されているオブジェクト数を返します。
+// Len returns the number of stored objects.
 func (h *Handler) Len() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.objects)
 }
 
-// Open は保存された内容の読み取りストリームを返します。
+// Open returns a read stream for the stored contents.
 func (h *Handler) Open(_ context.Context, uri string) (io.ReadCloser, error) {
 	bucket, key, err := h.parseObject(uri)
 	if err != nil {
@@ -188,11 +187,11 @@ func (h *Handler) Open(_ context.Context, uri string) (io.ReadCloser, error) {
 	if !ok {
 		return nil, notExist(uri)
 	}
-	// 保存している側のスライスを渡すと、読み手が書き換えられます。
+	// Handing out the stored slice would let the reader modify it.
 	return io.NopCloser(bytes.NewReader(slices.Clone(obj.data))), nil
 }
 
-// Stat はメタデータを返します。
+// Stat returns metadata.
 func (h *Handler) Stat(_ context.Context, uri string) (remoteio.ObjectInfo, error) {
 	bucket, key, err := h.parseObject(uri)
 	if err != nil {
@@ -218,10 +217,10 @@ func (h *Handler) Stat(_ context.Context, uri string) (remoteio.ObjectInfo, erro
 	}, nil
 }
 
-// List はプレフィックス配下を列挙します。
+// List enumerates what is under the prefix.
 //
-// 区切り文字の扱いは GCS / S3 に合わせています。ここが本物とずれると、
-// このパッケージを使うテスト全部が意味を失うため、実装の要点です。
+// Delimiter handling matches GCS / S3. If this drifted from the real thing, every test
+// using this package would lose its meaning, so it is the crux of the implementation.
 func (h *Handler) List(_ context.Context, uri string, opts remoteio.ListOptions) iter.Seq2[remoteio.Entry, error] {
 	uri = remoteio.ListPrefix(uri)
 
@@ -257,7 +256,7 @@ func (h *Handler) List(_ context.Context, uri string, opts remoteio.ListOptions)
 
 			if opts.Delimiter != "" {
 				if i := strings.Index(rest, opts.Delimiter); i >= 0 {
-					// 区切りより先は疑似ディレクトリへ畳みます。
+					// Fold what follows the delimiter into a pseudo-directory.
 					name := rest[:i+len(opts.Delimiter)]
 					if seen[name] {
 						continue
@@ -289,10 +288,11 @@ func (h *Handler) List(_ context.Context, uri string, opts remoteio.ListOptions)
 	}
 }
 
-// Write は内容を保存します。
+// Write stores the contents.
 //
-// 先に全部読み切ってから登録するため、途中で失敗しても保存済みの内容は変化しません
-// （Handler が要求する「成功しなければ書き込み先が変化しない」を満たします）。
+// It reads everything before registering it, so stored contents do not change even
+// when it fails part-way (meeting Handler's "the destination does not change unless
+// the write succeeds").
 func (h *Handler) Write(_ context.Context, uri string, src io.Reader, opts remoteio.WriteOptions) error {
 	bucket, key, err := h.parseObject(uri)
 	if err != nil {
@@ -304,7 +304,7 @@ func (h *Handler) Write(_ context.Context, uri string, src io.Reader, opts remot
 
 	data, err := io.ReadAll(src)
 	if err != nil {
-		return fmt.Errorf("メモリへの書き込みに失敗しました (URI: %s): %w", uri, err)
+		return fmt.Errorf("write to memory (URI: %s): %w", uri, err)
 	}
 
 	h.mu.Lock()
@@ -313,14 +313,14 @@ func (h *Handler) Write(_ context.Context, uri string, src io.Reader, opts remot
 	full := path(bucket, key)
 	if opts.IfNotExists {
 		if _, ok := h.objects[full]; ok {
-			return fmt.Errorf("オブジェクトは既に存在します (URI: %s): %w", uri, remoteio.ErrExist)
+			return fmt.Errorf("object already exists (URI: %s): %w", uri, remoteio.ErrExist)
 		}
 	}
 	h.objects[full] = h.newObject(data, opts)
 	return nil
 }
 
-// Delete はオブジェクトを削除します。不在はエラーにしません。
+// Delete removes an object. Absence is not an error.
 func (h *Handler) Delete(_ context.Context, uri string) error {
 	bucket, key, err := h.parseObject(uri)
 	if err != nil {
@@ -336,7 +336,7 @@ func (h *Handler) Delete(_ context.Context, uri string) error {
 	return nil
 }
 
-// CopyTo は保存された内容を複製します。remoteio.Copier の実装です。
+// CopyTo duplicates stored contents. It implements remoteio.Copier.
 func (h *Handler) CopyTo(_ context.Context, src, dst string) error {
 	srcBucket, srcKey, err := h.parseObject(src)
 	if err != nil {
@@ -364,8 +364,8 @@ func (h *Handler) CopyTo(_ context.Context, src, dst string) error {
 	return nil
 }
 
-// newObject は保存する値を組み立てます。呼び出し側が渡したマップを
-// そのまま抱えると、あとから書き換えられるため複製します。
+// newObject builds the value to store. Keeping the map the caller passed as is would
+// let it be modified later, so it is copied.
 func (h *Handler) newObject(data []byte, opts remoteio.WriteOptions) object {
 	return object{
 		data:               slices.Clone(data),
@@ -392,12 +392,12 @@ func (h *Handler) parseObject(uri string) (bucket, key string, err error) {
 	return remoteio.ParseObjectURI(h.scheme, uri)
 }
 
-// path は保存用のキーです。バケットを跨いだ前方一致を起こさないよう、
-// バケット名とオブジェクト名を "/" で繋いだ 1 本の文字列にします。
+// path is the storage key. To avoid prefix matches across buckets, it is one string
+// joining the bucket name and the object name with "/".
 func path(bucket, key string) string { return bucket + "/" + key }
 
 func notExist(uri string) error {
-	return fmt.Errorf("オブジェクトが見つかりません (URI: %s): %w", uri, remoteio.ErrNotExist)
+	return fmt.Errorf("object not found (URI: %s): %w", uri, remoteio.ErrNotExist)
 }
 
 func errSeq(err error) iter.Seq2[remoteio.Entry, error] {

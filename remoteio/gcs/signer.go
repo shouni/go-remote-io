@@ -10,16 +10,16 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// zeroTime は、疑似ディレクトリのように更新時刻を持たない Entry のための値です。
+// zeroTime is the value for Entry values without a modification time, such as pseudo-directories.
 var zeroTime time.Time
 
-// SignURL は GCS URI に対応する署名付き URL を生成します。
+// SignURL generates a signed URL for a GCS URI.
 //
-// remoteio.Signer の実装です。スキームは厳格で、gs:// 以外は受け付けません。
+// It implements remoteio.Signer. The scheme is strict: only gs:// is accepted.
 func (h *Handler) SignURL(_ context.Context, uri, method string, expires time.Duration) (string, error) {
 	bucket, object, err := h.parseObjectURI(uri)
 	if err != nil {
-		return "", fmt.Errorf("署名付きURLの生成に失敗しました: %w", err)
+		return "", fmt.Errorf("generate signed URL: %w", err)
 	}
 
 	opts := &storage.SignedURLOptions{
@@ -30,7 +30,7 @@ func (h *Handler) SignURL(_ context.Context, uri, method string, expires time.Du
 
 	signed, err := h.client.Bucket(bucket).SignedURL(object, opts)
 	if err != nil {
-		return "", fmt.Errorf("GCS署名付きURLの生成に失敗しました (URI: %s): %w", uri, err)
+		return "", fmt.Errorf("generate GCS signed URL (URI: %s): %w", uri, err)
 	}
 	return signed, nil
 }

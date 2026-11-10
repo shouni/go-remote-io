@@ -10,31 +10,31 @@ import (
 	"strings"
 )
 
-// filePrefix は file:// スキームのプレフィックスです。
-// スキーム名から導出するため、リテラルはこの 1 箇所だけです。
+// filePrefix is the prefix of the file:// scheme.
+// It is derived from the scheme name, so this is the only literal.
 const filePrefix = SchemeFile + schemeSeparator
 
-// fileHandler は file:// URI をローカルパスへ読み替えて localHandler へ委譲します。
+// fileHandler maps file:// URIs to local paths and delegates to localHandler.
 //
-// ローカルは「スキームを持たないパス」のフォールバックとして扱っていますが、
-// 設定ファイルや他のツールから渡る値は file:// を付けてくることがあり、
-// そのままでは未対応スキームとして弾かれます。読み替えを 1 箇所に置いて、
-// ローカルの実装は localHandler のまま 1 つに保ちます。
+// Local is treated as the fallback for "paths without a scheme", but values coming
+// from configuration files or other tools sometimes carry file://, and as is they
+// would be rejected as an unsupported scheme. Keeping the mapping in one place keeps
+// the local implementation as the single localHandler.
 type fileHandler struct {
 	local Handler
 }
 
 var _ Handler = fileHandler{}
 
-// NewFileHandler は file:// スキームを扱うハンドラを返します。
+// NewFileHandler returns a handler for the file:// scheme.
 //
-// file:///tmp/a.txt のようにホスト部が空の形を想定し、file:// を落とした残りを
-// ローカルパスとして扱います（file://data/a.txt は相対パス data/a.txt になります）。
-// パーセントエンコードは URI の規約どおりデコードするため、名前に % を含むファイルは
-// %25 と書く必要があります。
+// It expects an empty host part, as in file:///tmp/a.txt, and treats what remains
+// after dropping file:// as a local path (file://data/a.txt becomes the relative path
+// data/a.txt). Percent-encoding is decoded as the URI rules say, so a file whose name
+// contains % must be written as %25.
 func NewFileHandler() Handler { return fileHandler{local: NewLocalHandler()} }
 
-// Scheme は "file" を返します。
+// Scheme returns "file".
 func (fileHandler) Scheme() string { return SchemeFile }
 
 func (h fileHandler) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
@@ -45,7 +45,7 @@ func (h fileHandler) Open(ctx context.Context, uri string) (io.ReadCloser, error
 	return h.local.Open(ctx, path)
 }
 
-// Stat は file:// URI のメタデータを返します。URI は問い合わせに使った形へ戻します。
+// Stat returns the metadata of a file:// URI. The URI is put back into the form used for the query.
 func (h fileHandler) Stat(ctx context.Context, uri string) (ObjectInfo, error) {
 	path, err := toLocalPath(uri)
 	if err != nil {
@@ -59,9 +59,9 @@ func (h fileHandler) Stat(ctx context.Context, uri string) (ObjectInfo, error) {
 	return info, nil
 }
 
-// List は列挙結果の URI を file:// の形へ戻してから返します。
-// GCS / S3 のハンドラが gs:// / s3:// の URI を返すのと同じで、
-// 受け取った Entry をそのまま次の呼び出しへ渡せる形に揃えるためです。
+// List turns the URIs of the results back into the file:// form before returning them.
+// This matches the GCS / S3 handlers returning gs:// / s3:// URIs, so that a received
+// Entry can be passed as is to the next call.
 func (h fileHandler) List(ctx context.Context, uri string, opts ListOptions) iter.Seq2[Entry, error] {
 	path, err := toLocalPath(uri)
 	if err != nil {
@@ -97,23 +97,23 @@ func (h fileHandler) Delete(ctx context.Context, uri string) error {
 	return h.local.Delete(ctx, path)
 }
 
-// toLocalPath は file:// URI をローカルパスへ変換します。
+// toLocalPath converts a file:// URI to a local path.
 func toLocalPath(uri string) (string, error) {
 	if !strings.HasPrefix(uri, filePrefix) {
-		return "", fmt.Errorf("%w: file:// URI ではありません (%s)", ErrInvalidURI, uri)
+		return "", fmt.Errorf("%w: not a file:// URI (%s)", ErrInvalidURI, uri)
 	}
 	body := strings.TrimPrefix(uri, filePrefix)
 	if body == "" {
-		return "", fmt.Errorf("%w: パスが指定されていません (%s)", ErrInvalidURI, uri)
+		return "", fmt.Errorf("%w: no path given (%s)", ErrInvalidURI, uri)
 	}
 	decoded, err := url.PathUnescape(body)
 	if err != nil {
-		return "", wrapf(err, "file:// URI のデコードに失敗しました (%s)", uri)
+		return "", wrapf(err, "decode file:// URI (%s)", uri)
 	}
 	return filepath.FromSlash(decoded), nil
 }
 
-// toFileURI はローカルパスを file:// URI へ戻します。
+// toFileURI turns a local path back into a file:// URI.
 func toFileURI(path string) string {
 	return filePrefix + filepath.ToSlash(path)
 }

@@ -33,9 +33,9 @@ func newTestFactory(t *testing.T) *s3.ClientFactory {
 func TestFactoryOptions(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("WithConfig と WithRegion で解決できる", func(t *testing.T) {
-		// New(ctx) だけだと LoadDefaultConfig が認証情報を要求するため、
-		// 解決済みの設定を渡す経路をここで通します。
+	t.Run("resolves with WithConfig and WithRegion", func(t *testing.T) {
+		// New(ctx) alone makes LoadDefaultConfig require credentials, so the path
+		// that passes an already resolved config is exercised here.
 		factory, err := s3.New(ctx,
 			s3.WithConfig(aws.Config{Credentials: credentials.NewStaticCredentialsProvider("k", "s", "")}),
 			s3.WithRegion("us-east-1"),
@@ -47,10 +47,10 @@ func TestFactoryOptions(t *testing.T) {
 
 		handler, err := factory.Handler()
 		require.NoError(t, err)
-		assert.Equal(t, "s3", handler.Scheme(), "区切りを含まない RFC 3986 の形であること")
+		assert.Equal(t, "s3", handler.Scheme(), "must be the RFC 3986 form without the separator")
 	})
 
-	t.Run("リージョン未指定なら既定値", func(t *testing.T) {
+	t.Run("default region when unset", func(t *testing.T) {
 		factory, err := s3.New(ctx, s3.WithConfig(aws.Config{}))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = factory.Close() })
@@ -71,10 +71,10 @@ func TestFactoryClose(t *testing.T) {
 	_, err = factory.Handler()
 	assert.ErrorIs(t, err, remoteio.ErrClosed)
 
-	assert.NoError(t, factory.Close(), "Close は冪等")
+	assert.NoError(t, factory.Close(), "Close is idempotent")
 }
 
-// Close と各アクセサが並行に呼ばれても安全であることの確認です。
+// Checks that Close and each accessor are safe to call concurrently.
 func TestFactoryCloseIsRaceFree(t *testing.T) {
 	factory := newTestFactory(t)
 

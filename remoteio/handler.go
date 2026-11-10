@@ -7,108 +7,109 @@ import (
 	"time"
 )
 
-// Handler は 1 つの URI スキームに対する読み書きの実装です。
-// このライブラリを新しいストレージへ広げるときに実装するのは、この 1 本だけです。
+// Handler is the read/write implementation for one URI scheme.
+// Extending this library to a new storage backend means implementing this one interface.
 //
-// 実装対象をこの 1 本に絞っているのは、拡張点を 2 系統持つと、可変長オプションを
-// 受ける側と解決済みの設定を受ける側の両方に設定型を公開することになるためです。
-// オプションの解決はライブラリ側で完結させ、実装には解決済みの値だけを渡します。
+// The extension point is narrowed to this one because having two extension points
+// would mean exporting settings types both for the side that takes variadic options
+// and for the side that takes resolved settings. Option resolution happens entirely
+// inside the library, and implementations receive only the resolved values.
 //
-// Exists がメソッドに無いのは、Stat と errors.Is(err, ErrNotExist) から導出できるためです。
-// 実装が 1 つ減り、「不在を (false, nil) で返す」という約束を取り違える余地も消えます。
-// 利用側は Store.Exists を呼んでください。
+// Exists is not a method because it derives from Stat and errors.Is(err, ErrNotExist).
+// That removes one method to implement, and the room to get the "absence returns
+// (false, nil)" promise wrong. Consumers should call Store.Exists.
 type Handler interface {
-	// Scheme は、このハンドラが担当するスキーム名 ("gs" など) を返します。
-	// 区切り ("://") は含みません。
+	// Scheme returns the scheme name this handler is responsible for ("gs" and so on).
+	// It does not include the separator ("://").
 	//
-	// 空文字を返すハンドラは、どのスキームにも一致しなかったパスを受け取る
-	// フォールバック（ローカルファイルシステム）として扱われます。
+	// A handler returning the empty string is treated as the fallback (the local
+	// file system) that receives paths matching no scheme.
 	Scheme() string
 
-	// Open は読み取りストリームを返します。
-	// 対象が存在しない場合、エラーは ErrNotExist を含まなければなりません。
+	// Open returns a read stream.
+	// When the target does not exist, the error must contain ErrNotExist.
 	Open(ctx context.Context, uri string) (io.ReadCloser, error)
 
-	// Stat はメタデータを返します。
-	// 対象が存在しない場合、エラーは ErrNotExist を含まなければなりません。
+	// Stat returns metadata.
+	// When the target does not exist, the error must contain ErrNotExist.
 	Stat(ctx context.Context, uri string) (ObjectInfo, error)
 
-	// List は uri 配下を列挙します。uri は ListPrefix で正規化済みの状態で渡されます。
+	// List enumerates what is under uri. uri arrives already normalized by ListPrefix.
 	//
-	// 反復の途中で失敗したときは、ゼロ値の Entry と共にエラーを 1 度だけ yield して
-	// 打ち切ってください。呼び出し側が break したときは、そのまま反復を止めます。
+	// When iteration fails part-way, yield the error once with a zero-value Entry and
+	// stop. When the caller breaks, stop iterating as is.
 	List(ctx context.Context, uri string, opts ListOptions) iter.Seq2[Entry, error]
 
-	// Write は uri へ src の内容を書き込みます。
+	// Write writes the contents of src to uri.
 	//
-	// 実装は「成功しなければ書き込み先が変化しない」ことを保証しなければなりません。
-	// 途中で失敗した結果として切り詰められたオブジェクトが残ってはいけません。
-	// ローカルは一時ファイル + rename、GCS は ctx のキャンセルによる中断、
-	// S3 はマルチパートの abort でこれを満たしています。
+	// Implementations must guarantee that the destination does not change unless the
+	// write succeeds. A truncated object must never be left behind by a failure part-way.
+	// Local meets this with a temporary file + rename, GCS by aborting via ctx
+	// cancellation, and S3 by aborting the multipart upload.
 	//
-	// opts.IfNotExists が真のときは、既に存在する場合に ErrExist を含むエラーを返します。
+	// When opts.IfNotExists is true, it returns an error containing ErrExist if the target already exists.
 	Write(ctx context.Context, uri string, src io.Reader, opts WriteOptions) error
 
-	// Delete は対象を削除します。不在はエラーにしません（冪等）。
+	// Delete removes the target. Absence is not an error (idempotent).
 	Delete(ctx context.Context, uri string) error
 }
 
-// Copier は、同じスキーム内でサーバーサイドコピーができるハンドラが実装する
-// 任意インターフェースです。
+// Copier is an optional interface implemented by handlers that can copy
+// server-side within the same scheme.
 //
-// Store.Copy は、コピー元とコピー先が同じハンドラに解決され、かつそのハンドラが
-// Copier を実装しているときにだけこちらへ落とします。実装していなければ
-// これまで通りストリームで中継するので、呼び出し側に分岐は要りません。
+// Store.Copy falls through to it only when the source and destination resolve to
+// the same handler and that handler implements Copier. Otherwise it relays a stream
+// as before, so the caller needs no branching.
 //
-// これが無いと、同一バケット内のコピーでも全バイトがクライアントを往復します。
-// 利用側が CopierFrom を自前で呼ぶために 2 個目のクライアントを持つ、という
-// 迂回が実際に起きていました。
+// Without it, even a copy within one bucket sends every byte through the client.
+// A detour actually happened: a consumer held a second client just to call
+// CopierFrom itself.
 type Copier interface {
 	CopyTo(ctx context.Context, src, dst string) error
 }
 
-// Signer は、署名付き URL を生成できるハンドラが実装する任意インターフェースです。
+// Signer is an optional interface implemented by handlers that can generate signed URLs.
 //
-// 独立したインターフェースにすると、複数スキームを束ねる側が署名専用の振り分けを
-// 別に持つことになります。ハンドラの任意機能にすることで、振り分けは Router の
-// 1 箇所だけで済みます。
+// As an independent interface, whatever bundles several schemes would have to hold a
+// separate signer-only dispatch. As an optional handler feature, dispatch happens in
+// one place only, Router.
 type Signer interface {
 	SignURL(ctx context.Context, uri, method string, expires time.Duration) (string, error)
 }
 
-// ObjectInfo は、リソースのメタデータです。
+// ObjectInfo is the metadata of a resource.
 type ObjectInfo struct {
-	// URI は問い合わせに使った URI（ローカルならパス）がそのまま入ります。
+	// URI holds the URI used for the query as is (the path, for local files).
 	URI string
-	// Size はバイト数です。
+	// Size is the number of bytes.
 	Size int64
-	// ModTime は最終更新時刻です。
+	// ModTime is the last modification time.
 	ModTime time.Time
-	// ContentType は MIME タイプです。ローカルファイルシステムでは空になります。
+	// ContentType is the MIME type. It is empty on the local file system.
 	ContentType string
-	// Metadata は WithMetadata で書き込んだユーザー定義メタデータです。
-	// ローカルファイルシステムでは常に nil です。
-	// S3 はキーを小文字に正規化するため、書き込み時と大文字小文字が変わることがあります。
+	// Metadata is the user-defined metadata written with WithMetadata.
+	// It is always nil on the local file system.
+	// S3 normalizes keys to lower case, so their case may differ from what was written.
 	Metadata map[string]string
 }
 
-// Entry は List が返す 1 件です。
+// Entry is one item returned by List.
 //
-// callback へ文字列だけを渡す形にすると、疑似ディレクトリかどうかを
-// 「末尾が区切り文字か」で呼び出し側が判定し直すことになります。ハンドラは
-// attrs.Prefix や CommonPrefixes という型のついた情報を持っているので、
-// それを潰さずに渡します。
+// Passing only a string to a callback makes the caller re-decide whether it is a
+// pseudo-directory by "does it end with the delimiter". Handlers have typed
+// information — attrs.Prefix, CommonPrefixes — so it is passed on without
+// flattening it.
 type Entry struct {
-	// URI は完全な URI です。ルートの Store へそのまま渡せます。
+	// URI is the full URI. It can be passed straight to the root Store.
 	URI string
-	// Name は列挙したプレフィックスからの相対名です。
-	// スコープ付きストア (Store.Sub) へそのまま渡せます。
+	// Name is relative to the listed prefix.
+	// It can be passed straight to a scoped store (Store.Sub).
 	Name string
-	// IsPrefix は、これが疑似ディレクトリ（区切り文字で畳まれた階層）であることを表します。
-	// 区切り文字を指定した一覧でのみ真になり得ます。
+	// IsPrefix reports that this is a pseudo-directory (a hierarchy folded by the delimiter).
+	// It can be true only in a listing with a delimiter.
 	IsPrefix bool
-	// Size はバイト数です。IsPrefix が真のときは 0 です。
+	// Size is the number of bytes. It is 0 when IsPrefix is true.
 	Size int64
-	// ModTime は最終更新時刻です。IsPrefix が真のときはゼロ値です。
+	// ModTime is the last modification time. It is the zero value when IsPrefix is true.
 	ModTime time.Time
 }

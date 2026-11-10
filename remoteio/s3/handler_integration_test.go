@@ -24,11 +24,11 @@ import (
 
 const testBucket = "test-bucket"
 
-// newTestStore は、インプロセスの S3 フェイクに接続した Store を返します。
+// newTestStore returns a Store connected to an in-process S3 fake.
 //
-// docker も AWS 認証情報も要りません。フェイクは平文 HTTP で待ち受けるため、
-// TLS が無い S3 互換エンドポイント（MinIO や R2 のセルフホスト）と同じ条件になります。
-// PutObject 直呼びはこの条件で非 Seeker のボディを一切書けません。
+// Neither docker nor AWS credentials are needed. The fake listens on plain HTTP, which
+// is the same condition as an S3-compatible endpoint without TLS (self-hosted MinIO or
+// R2). Under this condition, calling PutObject directly cannot write a non-Seeker body at all.
 func newTestStore(t *testing.T, objects map[string]string) remoteio.Store {
 	t.Helper()
 
@@ -47,7 +47,7 @@ func newTestStore(t *testing.T, objects map[string]string) remoteio.Store {
 
 	client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
 		o.BaseEndpoint = aws.String(server.URL)
-		// フェイクは仮想ホスト形式のバケット名を解決できないためパス形式で話します。
+		// The fake cannot resolve virtual-hosted-style bucket names, so it talks path-style.
 		o.UsePathStyle = true
 	})
 
@@ -87,22 +87,22 @@ func TestOpenAndStat(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, map[string]string{"data/report.txt": "hello s3"})
 
-	t.Run("既存オブジェクトを読める", func(t *testing.T) {
+	t.Run("reads an existing object", func(t *testing.T) {
 		data, err := remoteio.ReadAll(ctx, store, uri("data/report.txt"))
 		require.NoError(t, err)
 		assert.Equal(t, "hello s3", string(data))
 	})
 
-	t.Run("不在は ErrNotExist を包んで返す", func(t *testing.T) {
+	t.Run("missing object wraps ErrNotExist", func(t *testing.T) {
 		_, err := store.Open(ctx, uri("data/missing.txt"))
 		assert.ErrorIs(t, err, remoteio.ErrNotExist)
 
-		// HeadObject は NoSuchKey ではなく NotFound を返すため、両方を見ています。
+		// HeadObject returns NotFound rather than NoSuchKey, so both are checked.
 		_, err = store.Stat(ctx, uri("data/missing.txt"))
 		assert.ErrorIs(t, err, remoteio.ErrNotExist)
 	})
 
-	t.Run("Exists は不在を (false, nil) で返す", func(t *testing.T) {
+	t.Run("Exists returns (false, nil) when missing", func(t *testing.T) {
 		ok, err := store.Exists(ctx, uri("data/missing.txt"))
 		require.NoError(t, err)
 		assert.False(t, ok)
@@ -112,7 +112,7 @@ func TestOpenAndStat(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("オブジェクト名が空の URI を拒否する", func(t *testing.T) {
+	t.Run("rejects a URI with an empty object name", func(t *testing.T) {
 		_, err := store.Open(ctx, "s3://"+testBucket)
 		assert.ErrorIs(t, err, remoteio.ErrInvalidURI)
 	})
@@ -126,13 +126,13 @@ func TestList(t *testing.T) {
 		"data-archive/c.txt": "c",
 	})
 
-	t.Run("区切り文字ありは直下のみ、疑似ディレクトリは IsPrefix", func(t *testing.T) {
+	t.Run("with delimiter lists direct children only, pseudo-directories are IsPrefix", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data"), remoteio.WithDelimiter("/")))
 		assert.ElementsMatch(t, []string{"a.txt", "sub/"}, names(entries))
 
 		for _, e := range entries {
 			if e.Name == "sub/" {
-				assert.True(t, e.IsPrefix, "CommonPrefixes を型のついた情報として渡すこと")
+				assert.True(t, e.IsPrefix, "CommonPrefixes are passed on as typed information")
 				assert.Equal(t, uri("data/sub/"), e.URI)
 			} else {
 				assert.False(t, e.IsPrefix)
@@ -140,12 +140,12 @@ func TestList(t *testing.T) {
 		}
 	})
 
-	t.Run("区切り文字なしは配下を再帰的に返す", func(t *testing.T) {
+	t.Run("without delimiter lists recursively", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data")))
 		assert.ElementsMatch(t, []string{"a.txt", "sub/b.txt"}, names(entries))
 	})
 
-	t.Run("プレフィックスは常に正規化され隣接する名前を拾わない", func(t *testing.T) {
+	t.Run("prefix is always normalized and skips adjacent names", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data")))
 		for _, e := range entries {
 			assert.NotContains(t, e.URI, "data-archive")
@@ -157,7 +157,7 @@ func TestWriteAndDelete(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, nil)
 
-	t.Run("書いた内容を読み戻せる", func(t *testing.T) {
+	t.Run("reads back what was written", func(t *testing.T) {
 		require.NoError(t, remoteio.WriteAll(ctx, store, uri("out/a.txt"), []byte("written"),
 			remoteio.WithContentType("text/plain"),
 			remoteio.WithCacheControl("no-store"),
@@ -172,51 +172,51 @@ func TestWriteAndDelete(t *testing.T) {
 		assert.Equal(t, "written", string(data))
 	})
 
-	t.Run("削除は冪等", func(t *testing.T) {
+	t.Run("delete is idempotent", func(t *testing.T) {
 		require.NoError(t, store.Delete(ctx, uri("out/a.txt")))
 		assert.NoError(t, store.Delete(ctx, uri("out/a.txt")))
 	})
 }
 
-// nonSeeker は Seeker を実装しない純粋な io.Reader です。
-// GCS の storage.Reader や HTTP レスポンスボディがこの形になります。
+// nonSeeker is a plain io.Reader that does not implement Seeker.
+// GCS's storage.Reader and HTTP response bodies take this shape.
 type nonSeeker struct{ r io.Reader }
 
 func (n *nonSeeker) Read(p []byte) (int, error) { return n.r.Read(p) }
 
-// 非 Seeker のボディを書けることの回帰テストです。
+// A regression test for writing a non-Seeker body.
 //
-// PutObject へ生の io.Reader を渡すと、TLS でないエンドポイントでは
-// 「unseekable stream is not supported without TLS and trailing checksum」で
-// 必ず失敗します。本番の AWS (https) は通るので気づきにくく、MinIO や R2 の
-// 平文エンドポイント、そしてクロスクラウドの Copy が壊れていた経路です。
+// Passing a raw io.Reader to PutObject always fails against a non-TLS endpoint with
+// "unseekable stream is not supported without TLS and trailing checksum". Production
+// AWS (https) passes, so it is easy to miss; this is the path that broke for plain
+// MinIO and R2 endpoints, and for cross-cloud Copy.
 func TestWriteAcceptsNonSeekableBody(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, nil)
 
 	err := store.Write(ctx, uri("out/stream.txt"), &nonSeeker{r: strings.NewReader("streamed body")})
-	require.NoError(t, err, "transfermanager は非 Seeker のストリームを扱えること")
+	require.NoError(t, err, "transfermanager can handle non-Seeker streams")
 
 	data, err := remoteio.ReadAll(ctx, store, uri("out/stream.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "streamed body", string(data))
 }
 
-// failingReader は途中まで読めたあとに失敗するリーダーです。
+// failingReader is a reader that fails after part of it has been read.
 type failingReader struct{ r io.Reader }
 
 func (f *failingReader) Read(p []byte) (int, error) {
 	if n, _ := f.r.Read(p); n > 0 {
 		return n, nil
 	}
-	return 0, errors.New("読み取り失敗")
+	return 0, errors.New("read failed")
 }
 
 func TestWriteIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, map[string]string{"out/existing.txt": "original"})
 
-	t.Run("失敗した書き込みはオブジェクトを作らない", func(t *testing.T) {
+	t.Run("failed write creates no object", func(t *testing.T) {
 		err := store.Write(ctx, uri("out/partial.txt"), &failingReader{r: strings.NewReader("partial-data")})
 		require.Error(t, err)
 
@@ -225,7 +225,7 @@ func TestWriteIsAtomic(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("失敗した上書きは既存の内容を壊さない", func(t *testing.T) {
+	t.Run("failed overwrite keeps existing content", func(t *testing.T) {
 		err := store.Write(ctx, uri("out/existing.txt"), &failingReader{r: strings.NewReader("partial-data")})
 		require.Error(t, err)
 
@@ -235,10 +235,10 @@ func TestWriteIsAtomic(t *testing.T) {
 	})
 }
 
-// 条件付き書き込みの確認です。
+// Checks conditional writes.
 //
-// 判定をストレージ側の If-None-Match に委ねることで、Exists で確かめてから
-// Write するときの競合（確認と書き込みの間に他のプロセスが割り込む）を避けます。
+// Leaving the decision to the storage-side If-None-Match avoids the race of checking
+// with Exists and then calling Write (another process slipping in between the check and the write).
 func TestWriteIfNotExists(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, nil)
@@ -247,15 +247,15 @@ func TestWriteIfNotExists(t *testing.T) {
 
 	err := remoteio.WriteAll(ctx, store, uri("once.txt"), []byte("second"), remoteio.WithIfNotExists())
 	if err == nil {
-		// gofakes3 が条件付きリクエストを解釈しない場合はここへ来ます。
-		// 本物の S3 との差分なので、黙って通さずに記録します。
-		t.Skip("フェイクが If-None-Match を解釈しないため、この経路は本物の S3 でのみ検証できます")
+		// This is reached when gofakes3 does not interpret conditional requests.
+		// It is a difference from the real S3, so it is recorded rather than passed silently.
+		t.Skip("the fake does not interpret If-None-Match, so this path can be verified only against the real S3")
 	}
 	assert.ErrorIs(t, err, remoteio.ErrExist)
 
 	data, err := remoteio.ReadAll(ctx, store, uri("once.txt"))
 	require.NoError(t, err)
-	assert.Equal(t, "first", string(data), "既存の内容が保たれること")
+	assert.Equal(t, "first", string(data), "the existing contents are kept")
 }
 
 func TestCopyUsesServerSideCopy(t *testing.T) {
@@ -272,7 +272,7 @@ func TestCopyUsesServerSideCopy(t *testing.T) {
 
 	ok, err := store.Exists(ctx, uri("src/video.mp4"))
 	require.NoError(t, err)
-	assert.True(t, ok, "Copy はコピー元を残す")
+	assert.True(t, ok, "Copy keeps the source")
 }
 
 func TestStoreAlsoHandlesLocalPaths(t *testing.T) {
@@ -293,8 +293,8 @@ func TestHandlerRejectsForeignScheme(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, nil)
 
-	// Store 経由では振り分けで弾かれますが、ハンドラは公開されているため
-	// 直接呼ばれる余地があります。
+	// Through Store it is filtered out at dispatch, but handlers are exported and can be
+	// called directly.
 	h := s3.NewHandler(awss3.New(awss3.Options{Region: s3.DefaultRegion}))
 	_, err := h.Open(ctx, "gs://other-bucket/key")
 	assert.ErrorIs(t, err, remoteio.ErrInvalidURI)
@@ -306,7 +306,7 @@ func TestSignURL(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, map[string]string{"a.txt": "x"})
 
-	t.Run("GET と PUT に対応する", func(t *testing.T) {
+	t.Run("supports GET and PUT", func(t *testing.T) {
 		for _, method := range []string{"GET", "PUT"} {
 			signed, err := store.SignURL(ctx, uri("a.txt"), method, 5*60)
 			require.NoError(t, err)
@@ -314,7 +314,7 @@ func TestSignURL(t *testing.T) {
 		}
 	})
 
-	t.Run("対応しないメソッドは ErrNotSupported", func(t *testing.T) {
+	t.Run("unsupported method returns ErrNotSupported", func(t *testing.T) {
 		_, err := store.SignURL(ctx, uri("a.txt"), "DELETE", 60)
 		assert.ErrorIs(t, err, remoteio.ErrNotSupported)
 	})

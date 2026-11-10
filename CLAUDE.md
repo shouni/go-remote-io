@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 * Comments, doc comments, error / log / panic messages and test assertion messages are in **English** (moved from Japanese on 2026-11-10; do not mix Japanese back in). Error strings follow Go style: lowercase, no trailing punctuation (ST1005).
 * Sentinel errors carry the `remoteio: ` prefix. A sentinel is an identifier; a wrap adds context for the reader (`wrapf`).
 * `README.md` is English, and `README.ja.md` is its Japanese version. Update the two together.
-* Subtest names (`t.Run` names and table `name` fields) are still in Japanese for now; they are not compared at runtime.
+* Subtest names (`t.Run` names and table `name` fields) are English too.
 
 ### Handling breaking changes
 

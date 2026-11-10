@@ -87,13 +87,13 @@ func TestOpenAndStat(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, map[string]string{"data/report.txt": "hello s3"})
 
-	t.Run("既存オブジェクトを読める", func(t *testing.T) {
+	t.Run("reads an existing object", func(t *testing.T) {
 		data, err := remoteio.ReadAll(ctx, store, uri("data/report.txt"))
 		require.NoError(t, err)
 		assert.Equal(t, "hello s3", string(data))
 	})
 
-	t.Run("不在は ErrNotExist を包んで返す", func(t *testing.T) {
+	t.Run("missing object wraps ErrNotExist", func(t *testing.T) {
 		_, err := store.Open(ctx, uri("data/missing.txt"))
 		assert.ErrorIs(t, err, remoteio.ErrNotExist)
 
@@ -102,7 +102,7 @@ func TestOpenAndStat(t *testing.T) {
 		assert.ErrorIs(t, err, remoteio.ErrNotExist)
 	})
 
-	t.Run("Exists は不在を (false, nil) で返す", func(t *testing.T) {
+	t.Run("Exists returns (false, nil) when missing", func(t *testing.T) {
 		ok, err := store.Exists(ctx, uri("data/missing.txt"))
 		require.NoError(t, err)
 		assert.False(t, ok)
@@ -112,7 +112,7 @@ func TestOpenAndStat(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("オブジェクト名が空の URI を拒否する", func(t *testing.T) {
+	t.Run("rejects a URI with an empty object name", func(t *testing.T) {
 		_, err := store.Open(ctx, "s3://"+testBucket)
 		assert.ErrorIs(t, err, remoteio.ErrInvalidURI)
 	})
@@ -126,7 +126,7 @@ func TestList(t *testing.T) {
 		"data-archive/c.txt": "c",
 	})
 
-	t.Run("区切り文字ありは直下のみ、疑似ディレクトリは IsPrefix", func(t *testing.T) {
+	t.Run("with delimiter lists direct children only, pseudo-directories are IsPrefix", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data"), remoteio.WithDelimiter("/")))
 		assert.ElementsMatch(t, []string{"a.txt", "sub/"}, names(entries))
 
@@ -140,12 +140,12 @@ func TestList(t *testing.T) {
 		}
 	})
 
-	t.Run("区切り文字なしは配下を再帰的に返す", func(t *testing.T) {
+	t.Run("without delimiter lists recursively", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data")))
 		assert.ElementsMatch(t, []string{"a.txt", "sub/b.txt"}, names(entries))
 	})
 
-	t.Run("プレフィックスは常に正規化され隣接する名前を拾わない", func(t *testing.T) {
+	t.Run("prefix is always normalized and skips adjacent names", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, uri("data")))
 		for _, e := range entries {
 			assert.NotContains(t, e.URI, "data-archive")
@@ -157,7 +157,7 @@ func TestWriteAndDelete(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, nil)
 
-	t.Run("書いた内容を読み戻せる", func(t *testing.T) {
+	t.Run("reads back what was written", func(t *testing.T) {
 		require.NoError(t, remoteio.WriteAll(ctx, store, uri("out/a.txt"), []byte("written"),
 			remoteio.WithContentType("text/plain"),
 			remoteio.WithCacheControl("no-store"),
@@ -172,7 +172,7 @@ func TestWriteAndDelete(t *testing.T) {
 		assert.Equal(t, "written", string(data))
 	})
 
-	t.Run("削除は冪等", func(t *testing.T) {
+	t.Run("delete is idempotent", func(t *testing.T) {
 		require.NoError(t, store.Delete(ctx, uri("out/a.txt")))
 		assert.NoError(t, store.Delete(ctx, uri("out/a.txt")))
 	})
@@ -216,7 +216,7 @@ func TestWriteIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, map[string]string{"out/existing.txt": "original"})
 
-	t.Run("失敗した書き込みはオブジェクトを作らない", func(t *testing.T) {
+	t.Run("failed write creates no object", func(t *testing.T) {
 		err := store.Write(ctx, uri("out/partial.txt"), &failingReader{r: strings.NewReader("partial-data")})
 		require.Error(t, err)
 
@@ -225,7 +225,7 @@ func TestWriteIsAtomic(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("失敗した上書きは既存の内容を壊さない", func(t *testing.T) {
+	t.Run("failed overwrite keeps existing content", func(t *testing.T) {
 		err := store.Write(ctx, uri("out/existing.txt"), &failingReader{r: strings.NewReader("partial-data")})
 		require.Error(t, err)
 
@@ -306,7 +306,7 @@ func TestSignURL(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, map[string]string{"a.txt": "x"})
 
-	t.Run("GET と PUT に対応する", func(t *testing.T) {
+	t.Run("supports GET and PUT", func(t *testing.T) {
 		for _, method := range []string{"GET", "PUT"} {
 			signed, err := store.SignURL(ctx, uri("a.txt"), method, 5*60)
 			require.NoError(t, err)
@@ -314,7 +314,7 @@ func TestSignURL(t *testing.T) {
 		}
 	})
 
-	t.Run("対応しないメソッドは ErrNotSupported", func(t *testing.T) {
+	t.Run("unsupported method returns ErrNotSupported", func(t *testing.T) {
 		_, err := store.SignURL(ctx, uri("a.txt"), "DELETE", 60)
 		assert.ErrorIs(t, err, remoteio.ErrNotSupported)
 	})

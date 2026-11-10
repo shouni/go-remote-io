@@ -33,7 +33,7 @@ func newTestFactory(t *testing.T) *s3.ClientFactory {
 func TestFactoryOptions(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("WithConfig と WithRegion で解決できる", func(t *testing.T) {
+	t.Run("resolves with WithConfig and WithRegion", func(t *testing.T) {
 		// New(ctx) alone makes LoadDefaultConfig require credentials, so the path
 		// that passes an already resolved config is exercised here.
 		factory, err := s3.New(ctx,
@@ -50,7 +50,7 @@ func TestFactoryOptions(t *testing.T) {
 		assert.Equal(t, "s3", handler.Scheme(), "must be the RFC 3986 form without the separator")
 	})
 
-	t.Run("リージョン未指定なら既定値", func(t *testing.T) {
+	t.Run("default region when unset", func(t *testing.T) {
 		factory, err := s3.New(ctx, s3.WithConfig(aws.Config{}))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = factory.Close() })

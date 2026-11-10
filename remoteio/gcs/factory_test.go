@@ -32,7 +32,7 @@ func TestFactoryAccessors(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
 
-	t.Run("Store は gs:// とローカルを扱う", func(t *testing.T) {
+	t.Run("Store handles gs:// and local paths", func(t *testing.T) {
 		store, err := factory.Store()
 		require.NoError(t, err)
 
@@ -45,7 +45,7 @@ func TestFactoryAccessors(t *testing.T) {
 		assert.ErrorIs(t, err, remoteio.ErrUnsupportedScheme)
 	})
 
-	t.Run("Handler は担当スキームを返す", func(t *testing.T) {
+	t.Run("Handler returns its scheme", func(t *testing.T) {
 		handler, err := factory.Handler()
 		require.NoError(t, err)
 		assert.Equal(t, gcs.Scheme, handler.Scheme())
@@ -56,7 +56,7 @@ func TestFactoryAccessors(t *testing.T) {
 func TestFactoryClose(t *testing.T) {
 	factory := newTestFactory(t)
 
-	t.Run("WithClient のクライアントは閉じない", func(t *testing.T) {
+	t.Run("does not close a WithClient client", func(t *testing.T) {
 		require.NoError(t, factory.Close())
 
 		// The lifecycle of an injected client stays with the caller, so the client
@@ -69,7 +69,7 @@ func TestFactoryClose(t *testing.T) {
 		assert.ErrorIs(t, err, remoteio.ErrClosed)
 	})
 
-	t.Run("Close は冪等", func(t *testing.T) {
+	t.Run("Close is idempotent", func(t *testing.T) {
 		assert.NoError(t, factory.Close())
 	})
 }

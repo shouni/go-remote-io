@@ -69,21 +69,21 @@ func TestHandler(t *testing.T, newFixture func(t *testing.T) Fixture) {
 		})
 	}
 
-	run("Scheme は呼ぶたびに同じ値を返す", testSchemeIsStable)
-	run("不在は ErrNotExist を含む", testNotExist)
-	run("書いた内容を読み戻せる", testWriteReadRoundTrip)
-	run("Stat がサイズと URI を返す", testStatMetadata)
-	run("Delete は冪等", testDeleteIsIdempotent)
-	run("区切り文字ありの一覧は直下のみ", testListShallow)
-	run("区切り文字なしの一覧は再帰的", testListRecursive)
-	run("一覧のプレフィックスは常に正規化される", testListNormalizesPrefix)
-	run("何も無いプレフィックスの一覧は空でエラーにしない", testListEmptyPrefix)
-	run("一覧は break で打ち切れる", testListStops)
-	run("Entry.URI はそのまま開ける", testEntryURIIsUsable)
-	run("失敗した書き込みは書き込み先を変えない", testWriteIsAtomic)
-	run("条件付き書き込みは既存を守る", testWriteIfNotExists)
-	run("担当外のスキームを拒否する", testRejectsForeignScheme)
-	run("オブジェクト名が空の URI を拒否する", testRejectsEmptyObjectName)
+	run("Scheme is stable across calls", testSchemeIsStable)
+	run("missing wraps ErrNotExist", testNotExist)
+	run("reads back what was written", testWriteReadRoundTrip)
+	run("Stat returns size and URI", testStatMetadata)
+	run("Delete is idempotent", testDeleteIsIdempotent)
+	run("list with delimiter is shallow", testListShallow)
+	run("list without delimiter is recursive", testListRecursive)
+	run("list prefix is always normalized", testListNormalizesPrefix)
+	run("list of empty prefix is empty without error", testListEmptyPrefix)
+	run("list stops on break", testListStops)
+	run("Entry.URI opens as is", testEntryURIIsUsable)
+	run("failed write leaves the target unchanged", testWriteIsAtomic)
+	run("conditional write protects the existing object", testWriteIfNotExists)
+	run("rejects a foreign scheme", testRejectsForeignScheme)
+	run("rejects a URI with an empty object name", testRejectsEmptyObjectName)
 }
 
 // uri builds a name relative to Root into the form the handler receives.
@@ -335,7 +335,7 @@ func (f *failingReader) Read(p []byte) (int, error) {
 func testWriteIsAtomic(t *testing.T, f Fixture) {
 	ctx := context.Background()
 
-	t.Run("新規", func(t *testing.T) {
+	t.Run("new", func(t *testing.T) {
 		uri := f.uri("atomic/new.txt")
 		src := &failingReader{r: bytes.NewReader([]byte("partial-data"))}
 		if err := f.Handler.Write(ctx, uri, src, remoteio.WriteOptions{}); err == nil {
@@ -346,7 +346,7 @@ func testWriteIsAtomic(t *testing.T, f Fixture) {
 		}
 	})
 
-	t.Run("上書き", func(t *testing.T) {
+	t.Run("overwrite", func(t *testing.T) {
 		uri := f.write(t, "atomic/existing.txt", "original")
 		src := &failingReader{r: bytes.NewReader([]byte("partial-data"))}
 		if err := f.Handler.Write(ctx, uri, src, remoteio.WriteOptions{}); err == nil {

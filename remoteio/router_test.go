@@ -50,13 +50,13 @@ func TestRouterResolve(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore()
 
-	t.Run("未登録スキームは ErrUnsupportedScheme", func(t *testing.T) {
+	t.Run("unregistered scheme returns ErrUnsupportedScheme", func(t *testing.T) {
 		_, err := store.Open(ctx, "gs://bucket/key")
 		assert.ErrorIs(t, err, ErrUnsupportedScheme)
 		assert.Contains(t, err.Error(), "gs", "the message keeps which scheme it was")
 	})
 
-	t.Run("ローカルとfileは既定で登録される", func(t *testing.T) {
+	t.Run("local and file are registered by default", func(t *testing.T) {
 		assert.Equal(t, []string{SchemeFile}, store.Schemes(), "the fallback is not included in Schemes")
 
 		dir := t.TempDir()
@@ -72,7 +72,7 @@ func TestRouterResolve(t *testing.T) {
 		assert.Equal(t, "hello", string(data))
 	})
 
-	t.Run("フォールバックが無ければローカルパスも拒否する", func(t *testing.T) {
+	t.Run("without fallback local paths are rejected too", func(t *testing.T) {
 		bare := NewRouter(NewFileHandler())
 		_, err := bare.Open(ctx, "a.txt")
 		assert.ErrorIs(t, err, ErrUnsupportedScheme)
@@ -89,25 +89,25 @@ func TestExistsIsAboutObjectsOnly(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
 
-	t.Run("ファイルは true", func(t *testing.T) {
+	t.Run("file is true", func(t *testing.T) {
 		ok, err := store.Exists(ctx, filepath.Join(dir, "a.txt"))
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
 
-	t.Run("不在は (false, nil)", func(t *testing.T) {
+	t.Run("missing is (false, nil)", func(t *testing.T) {
 		ok, err := store.Exists(ctx, filepath.Join(dir, "missing.txt"))
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})
 
-	t.Run("ディレクトリは false", func(t *testing.T) {
+	t.Run("directory is false", func(t *testing.T) {
 		ok, err := store.Exists(ctx, filepath.Join(dir, "sub"))
 		require.NoError(t, err)
 		assert.False(t, ok, "remote storage has no directory entity, so local matches it")
 	})
 
-	t.Run("Stat もディレクトリには ErrNotExist", func(t *testing.T) {
+	t.Run("Stat on a directory returns ErrNotExist", func(t *testing.T) {
 		_, err := store.Stat(ctx, filepath.Join(dir, "sub"))
 		assert.ErrorIs(t, err, ErrNotExist)
 	})
@@ -120,7 +120,7 @@ func TestSubScoping(t *testing.T) {
 
 	jobs := store.Sub(filepath.Join(dir, "jobs"))
 
-	t.Run("相対名がスコープ内へ解決される", func(t *testing.T) {
+	t.Run("relative name resolves inside the scope", func(t *testing.T) {
 		require.NoError(t, WriteAll(ctx, jobs, "j1/status.json", []byte(`{"state":"queued"}`)))
 
 		// Reading from the root store by absolute path shows whether the join is as intended.
@@ -129,14 +129,14 @@ func TestSubScoping(t *testing.T) {
 		assert.JSONEq(t, `{"state":"queued"}`, string(data))
 	})
 
-	t.Run("入れ子の Sub は積み上がる", func(t *testing.T) {
+	t.Run("nested Sub stacks", func(t *testing.T) {
 		j1 := jobs.Sub("j1")
 		data, err := ReadAll(ctx, j1, "status.json")
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"state":"queued"}`, string(data))
 	})
 
-	t.Run("絶対URIは ErrAbsoluteName で拒否する", func(t *testing.T) {
+	t.Run("absolute URI is rejected with ErrAbsoluteName", func(t *testing.T) {
 		// Keeps code that thinks it narrowed its scope from writing to another bucket.
 		err := WriteAll(ctx, jobs, "gs://other-bucket/x.json", []byte("{}"))
 		assert.ErrorIs(t, err, ErrAbsoluteName)
@@ -147,7 +147,7 @@ func TestSubScoping(t *testing.T) {
 		assert.ErrorIs(t, firstErr(t, jobs.List(ctx, "s3://other/x")), ErrAbsoluteName)
 	})
 
-	t.Run("Entry.Name はスコープ付きストアへそのまま渡せる", func(t *testing.T) {
+	t.Run("Entry.Name passes straight to the scoped store", func(t *testing.T) {
 		require.NoError(t, WriteAll(ctx, jobs, "j2/status.json", []byte(`{}`)))
 
 		var found bool
@@ -181,7 +181,7 @@ func TestListLocal(t *testing.T) {
 	write("data/sub/b.txt")
 	write("data-archive/c.txt")
 
-	t.Run("区切り文字ありは直下のみ、疑似ディレクトリは IsPrefix", func(t *testing.T) {
+	t.Run("with delimiter lists direct children only, pseudo-directories are IsPrefix", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "data"), WithDelimiter("/")))
 		assert.ElementsMatch(t, []string{"a.txt", "sub/"}, names(entries))
 
@@ -195,7 +195,7 @@ func TestListLocal(t *testing.T) {
 		}
 	})
 
-	t.Run("区切り文字なしは再帰的にファイルのみ", func(t *testing.T) {
+	t.Run("without delimiter lists files recursively", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "data")))
 		assert.ElementsMatch(t, []string{"a.txt", "sub/b.txt"}, names(entries))
 		for _, e := range entries {
@@ -205,14 +205,14 @@ func TestListLocal(t *testing.T) {
 
 	// With a bare prefix match when no delimiter was given,
 	// "data" also picked up "data-archive/".
-	t.Run("プレフィックスは常に正規化される", func(t *testing.T) {
+	t.Run("prefix is always normalized", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "data")))
 		for _, e := range entries {
 			assert.NotContains(t, e.URI, "data-archive", "adjacent names are not picked up")
 		}
 	})
 
-	t.Run("break で打ち切れる", func(t *testing.T) {
+	t.Run("stops on break", func(t *testing.T) {
 		var seen int
 		for _, err := range store.List(ctx, dir) {
 			require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestListLocal(t *testing.T) {
 	// Remote storage has no state such as "a prefix that does not exist", so making it
 	// an error for local alone would make the same call mean different things per scheme.
 	// The contract is storetest's "listing a prefix with nothing under it returns empty, not an error".
-	t.Run("不在ディレクトリは空の一覧", func(t *testing.T) {
+	t.Run("missing directory lists empty", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, filepath.Join(dir, "missing")))
 		assert.Empty(t, entries)
 	})
@@ -257,7 +257,7 @@ func TestWriteIsAtomic(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "original", string(data), "a failed write must not break the existing contents")
 
-	t.Run("一時ファイルを残さない", func(t *testing.T) {
+	t.Run("leaves no temp file", func(t *testing.T) {
 		entries, err := os.ReadDir(dir)
 		require.NoError(t, err)
 		for _, e := range entries {
@@ -265,7 +265,7 @@ func TestWriteIsAtomic(t *testing.T) {
 		}
 	})
 
-	t.Run("既存ファイルのパーミッションを引き継ぐ", func(t *testing.T) {
+	t.Run("keeps the existing file's permissions", func(t *testing.T) {
 		require.NoError(t, WriteAll(ctx, store, path, []byte("replaced")))
 		info, err := os.Stat(path)
 		require.NoError(t, err)
@@ -313,7 +313,7 @@ func TestCopyLocal(t *testing.T) {
 	dst := filepath.Join(dir, "dst.txt")
 	require.NoError(t, WriteAll(ctx, store, src, []byte("payload")))
 
-	t.Run("Copy はコピー元を残す", func(t *testing.T) {
+	t.Run("Copy keeps the source", func(t *testing.T) {
 		require.NoError(t, store.Copy(ctx, src, dst))
 
 		data, err := ReadAll(ctx, store, dst)
@@ -325,7 +325,7 @@ func TestCopyLocal(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("コピー元が無ければコピー先を作らない", func(t *testing.T) {
+	t.Run("missing source creates no destination", func(t *testing.T) {
 		err := store.Copy(ctx, filepath.Join(dir, "missing.txt"), filepath.Join(dir, "never.txt"))
 		assert.ErrorIs(t, err, ErrNotExist)
 
@@ -360,25 +360,25 @@ func TestFileHandlerRoundTrip(t *testing.T) {
 	uri := "file://" + filepath.ToSlash(filepath.Join(dir, "a.txt"))
 	require.NoError(t, WriteAll(ctx, store, uri, []byte("via file scheme")))
 
-	t.Run("スキームなしのパスからも同じ内容が読める", func(t *testing.T) {
+	t.Run("same content reads via a schemeless path", func(t *testing.T) {
 		data, err := ReadAll(ctx, store, filepath.Join(dir, "a.txt"))
 		require.NoError(t, err)
 		assert.Equal(t, "via file scheme", string(data))
 	})
 
-	t.Run("Stat の URI は問い合わせた形に戻る", func(t *testing.T) {
+	t.Run("Stat URI keeps the queried form", func(t *testing.T) {
 		info, err := store.Stat(ctx, uri)
 		require.NoError(t, err)
 		assert.Equal(t, uri, info.URI)
 	})
 
-	t.Run("List は file:// の URI を返す", func(t *testing.T) {
+	t.Run("List returns file:// URIs", func(t *testing.T) {
 		entries := collect(t, store.List(ctx, "file://"+filepath.ToSlash(dir)))
 		require.Len(t, entries, 1)
 		assert.True(t, strings.HasPrefix(entries[0].URI, "file://"), "in a form that can be passed as is to the next call")
 	})
 
-	t.Run("パーセントエンコードをデコードする", func(t *testing.T) {
+	t.Run("decodes percent-encoding", func(t *testing.T) {
 		spaced := filepath.Join(dir, "a b.txt")
 		require.NoError(t, os.WriteFile(spaced, []byte("spaced"), 0o644))
 
@@ -387,7 +387,7 @@ func TestFileHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "spaced", string(data))
 	})
 
-	t.Run("file:// でない URI は ErrInvalidURI", func(t *testing.T) {
+	t.Run("non-file:// URI returns ErrInvalidURI", func(t *testing.T) {
 		_, err := NewFileHandler().Open(ctx, "gs://b/k")
 		assert.ErrorIs(t, err, ErrInvalidURI)
 	})
@@ -424,7 +424,7 @@ func TestSubKeepsDecoratedBehaviour(t *testing.T) {
 
 	assert.Equal(t, 1, dec.opens, "Open through the scope also goes through the wrapper")
 
-	t.Run("入れ子の Sub でも保たれる", func(t *testing.T) {
+	t.Run("holds through nested Sub", func(t *testing.T) {
 		nested := jobs.Sub(".")
 		_, err := ReadAll(ctx, nested, "a.txt")
 		require.NoError(t, err)

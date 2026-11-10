@@ -57,7 +57,7 @@ func TestDeletePrefix(t *testing.T) {
 		require.NoError(t, WriteAll(ctx, store, name, []byte("x")))
 	}
 
-	t.Run("配下を再帰的に消し、隣のプレフィックスは残す", func(t *testing.T) {
+	t.Run("removes everything below recursively and keeps the sibling prefix", func(t *testing.T) {
 		t.Parallel()
 		store := NewStore()
 		dir := t.TempDir()
@@ -80,7 +80,7 @@ func TestDeletePrefix(t *testing.T) {
 		}
 	})
 
-	t.Run("スコープ付きストアには相対名で消せる", func(t *testing.T) {
+	t.Run("scoped store deletes by relative name", func(t *testing.T) {
 		t.Parallel()
 		store := NewStore()
 		dir := t.TempDir()
@@ -102,14 +102,14 @@ func TestDeletePrefix(t *testing.T) {
 		assert.Equal(t, 1, deleted)
 	})
 
-	t.Run("何も無いプレフィックスは 0 件で成功", func(t *testing.T) {
+	t.Run("empty prefix succeeds with zero deletions", func(t *testing.T) {
 		t.Parallel()
 		deleted, err := DeletePrefix(ctx, NewStore(), filepath.Join(t.TempDir(), "missing"))
 		require.NoError(t, err)
 		assert.Zero(t, deleted)
 	})
 
-	t.Run("バケットの根は拒否する", func(t *testing.T) {
+	t.Run("rejects the bucket root", func(t *testing.T) {
 		t.Parallel()
 		for _, prefix := range []string{"gs://bucket", "gs://bucket/", "s3://bucket"} {
 			_, err := DeletePrefix(ctx, NewStore(), prefix)

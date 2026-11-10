@@ -17,11 +17,11 @@ func TestScheme(t *testing.T) {
 		{"GCS", "gs://bucket/key", SchemeGCS},
 		{"S3", "s3://bucket/key", SchemeS3},
 		{"file", "file:///tmp/a.txt", SchemeFile},
-		{"ローカル相対パス", "data/a.txt", ""},
-		{"ローカル絶対パス", "/tmp/a.txt", ""},
-		{"空文字", "", ""},
-		{"区切りだけ", "://bucket", ""},
-		{"区切りを持たないURI", "mailto:a@example.com", ""},
+		{"local relative path", "data/a.txt", ""},
+		{"local absolute path", "/tmp/a.txt", ""},
+		{"empty", "", ""},
+		{"separator only", "://bucket", ""},
+		{"URI without separator", "mailto:a@example.com", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestHasSchemeRejectsPrefixCollision(t *testing.T) {
 }
 
 func TestParseURI(t *testing.T) {
-	t.Run("バケットとキーに分解する", func(t *testing.T) {
+	t.Run("splits into bucket and key", func(t *testing.T) {
 		scheme, bucket, object, err := ParseURI("gs://my-bucket/a/b.txt")
 		require.NoError(t, err)
 		assert.Equal(t, SchemeGCS, scheme)
@@ -47,19 +47,19 @@ func TestParseURI(t *testing.T) {
 		assert.Equal(t, "a/b.txt", object)
 	})
 
-	t.Run("キーが空でも通る", func(t *testing.T) {
+	t.Run("accepts an empty key", func(t *testing.T) {
 		_, bucket, object, err := ParseURI("s3://my-bucket")
 		require.NoError(t, err)
 		assert.Equal(t, "my-bucket", bucket)
 		assert.Empty(t, object)
 	})
 
-	t.Run("スキームが無ければ ErrInvalidURI", func(t *testing.T) {
+	t.Run("no scheme returns ErrInvalidURI", func(t *testing.T) {
 		_, _, _, err := ParseURI("data/a.txt")
 		assert.ErrorIs(t, err, ErrInvalidURI)
 	})
 
-	t.Run("バケット名が空なら ErrInvalidURI", func(t *testing.T) {
+	t.Run("empty bucket returns ErrInvalidURI", func(t *testing.T) {
 		_, _, _, err := ParseURI("gs:///a.txt")
 		assert.ErrorIs(t, err, ErrInvalidURI)
 	})
@@ -86,11 +86,11 @@ func TestBuildURIRoundTrip(t *testing.T) {
 		bucket, object string
 		want           string
 	}{
-		{"通常", "b", "a/x.txt", "gs://b/a/x.txt"},
-		{"キーなし", "b", "", "gs://b"},
-		{"先頭スラッシュは畳む", "b", "/a/x.txt", "gs://b/a/x.txt"},
-		{"空白を含むキーはそのまま", "b", "a b.txt", "gs://b/a b.txt"},
-		{"? を含むキーはそのまま", "b", "a?b.txt", "gs://b/a?b.txt"},
+		{"plain", "b", "a/x.txt", "gs://b/a/x.txt"},
+		{"no key", "b", "", "gs://b"},
+		{"collapses leading slash", "b", "/a/x.txt", "gs://b/a/x.txt"},
+		{"keeps a key with spaces", "b", "a b.txt", "gs://b/a b.txt"},
+		{"keeps a key with ?", "b", "a?b.txt", "gs://b/a?b.txt"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,11 +116,11 @@ func TestListPrefixAlwaysNormalizes(t *testing.T) {
 		uri  string
 		want string
 	}{
-		{"末尾に区切りを足す", "gs://b/data", "gs://b/data/"},
-		{"既に区切りで終わる", "gs://b/data/", "gs://b/data/"},
-		{"バケット直下はそのまま", "gs://b", "gs://b"},
-		{"ローカルパス", "out/dir", "out/dir/"},
-		{"空文字", "", ""},
+		{"appends a trailing separator", "gs://b/data", "gs://b/data/"},
+		{"already ends with separator", "gs://b/data/", "gs://b/data/"},
+		{"bucket root unchanged", "gs://b", "gs://b"},
+		{"local path", "out/dir", "out/dir/"},
+		{"empty", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,26 +131,26 @@ func TestListPrefixAlwaysNormalizes(t *testing.T) {
 }
 
 func TestDir(t *testing.T) {
-	t.Run("リモート", func(t *testing.T) {
+	t.Run("remote", func(t *testing.T) {
 		assert.Equal(t, "gs://b/a/", Dir("gs://b/a/x.txt"))
 		assert.Equal(t, "gs://b/a/", Dir("gs://b/a/"))
 		assert.Equal(t, "gs://b/", Dir("gs://b/x.txt"))
 		assert.Equal(t, "gs://b/", Dir("gs://b"))
 	})
 
-	t.Run("空白や ? を含むキーを壊さない", func(t *testing.T) {
+	t.Run("keeps keys with spaces or ?", func(t *testing.T) {
 		// Through net/url this would turn into %20 or a query separator.
 		assert.Equal(t, "gs://b/a b/", Dir("gs://b/a b/x y.txt"))
 		assert.Equal(t, "gs://b/a?b/", Dir("gs://b/a?b/x.txt"))
 	})
 
-	t.Run("ローカル", func(t *testing.T) {
+	t.Run("local", func(t *testing.T) {
 		sep := string(filepath.Separator)
 		assert.Equal(t, "."+sep, Dir("x.txt"))
 		assert.Equal(t, filepath.Join("a", "b")+sep, Dir(filepath.Join("a", "b", "x.txt")))
 	})
 
-	t.Run("空文字", func(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
 		assert.Empty(t, Dir(""))
 	})
 }

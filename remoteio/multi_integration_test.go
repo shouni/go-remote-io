@@ -74,13 +74,13 @@ func TestMultiSchemeStore(t *testing.T) {
 	ctx := context.Background()
 	store := newMultiStore(t)
 
-	t.Run("両スキームが登録される", func(t *testing.T) {
+	t.Run("both schemes are registered", func(t *testing.T) {
 		router, ok := store.(*remoteio.Router)
 		require.True(t, ok)
 		assert.Equal(t, []string{"file", "gs", "s3"}, router.Schemes(), "stable in lexical order")
 	})
 
-	t.Run("同じストアで両方へ読み書きできる", func(t *testing.T) {
+	t.Run("one store reads and writes both", func(t *testing.T) {
 		require.NoError(t, remoteio.WriteAll(ctx, store, gcsURI("a.txt"), []byte("from gcs")))
 		require.NoError(t, remoteio.WriteAll(ctx, store, s3URI("a.txt"), []byte("from s3")))
 
@@ -96,7 +96,7 @@ func TestMultiSchemeStore(t *testing.T) {
 	// In a cross-cloud copy, the source stream is not an io.Seeker.
 	// If the S3 side called PutObject directly, this would always fail against a plain
 	// endpoint with "unseekable stream is not supported without TLS".
-	t.Run("GCS から S3 へコピーできる", func(t *testing.T) {
+	t.Run("copies from GCS to S3", func(t *testing.T) {
 		require.NoError(t, remoteio.WriteAll(ctx, store, gcsURI("src/payload.bin"), []byte("cross-cloud")))
 		require.NoError(t, store.Copy(ctx, gcsURI("src/payload.bin"), s3URI("dst/payload.bin")))
 
@@ -105,7 +105,7 @@ func TestMultiSchemeStore(t *testing.T) {
 		assert.Equal(t, "cross-cloud", string(got))
 	})
 
-	t.Run("S3 から GCS へコピーできる", func(t *testing.T) {
+	t.Run("copies from S3 to GCS", func(t *testing.T) {
 		require.NoError(t, remoteio.WriteAll(ctx, store, s3URI("src/back.bin"), []byte("back")))
 		require.NoError(t, store.Copy(ctx, s3URI("src/back.bin"), gcsURI("dst/back.bin")))
 
@@ -114,13 +114,13 @@ func TestMultiSchemeStore(t *testing.T) {
 		assert.Equal(t, "back", string(got))
 	})
 
-	t.Run("署名器はスキームごとに振り分けられる", func(t *testing.T) {
+	t.Run("signers are dispatched by scheme", func(t *testing.T) {
 		signed, err := store.SignURL(ctx, s3URI("a.txt"), "GET", 60)
 		require.NoError(t, err)
 		assert.Contains(t, signed, "X-Amz-Signature")
 	})
 
-	t.Run("ローカルパスも同じストアで扱える", func(t *testing.T) {
+	t.Run("same store handles local paths", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, remoteio.WriteAll(ctx, store, dir+"/local.txt", []byte("local")))
 
@@ -129,7 +129,7 @@ func TestMultiSchemeStore(t *testing.T) {
 		assert.Equal(t, "local", string(got))
 	})
 
-	t.Run("未登録スキームは ErrUnsupportedScheme", func(t *testing.T) {
+	t.Run("unregistered scheme returns ErrUnsupportedScheme", func(t *testing.T) {
 		_, err := store.Open(ctx, "azure://container/blob")
 		assert.ErrorIs(t, err, remoteio.ErrUnsupportedScheme)
 	})

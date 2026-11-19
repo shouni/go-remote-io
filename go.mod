@@ -3,7 +3,7 @@ module github.com/shouni/go-remote-io
 go 1.27
 
 require (
-	cloud.google.com/go/storage v1.70.0
+	cloud.google.com/go/storage v1.71.0
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.18
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.0
@@ -19,7 +19,7 @@ require (
 require (
 	cel.dev/expr v0.26.0 // indirect
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/auth v0.24.3 // indirect
+	cloud.google.com/go/auth v0.24.4 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	cloud.google.com/go/iam v1.15.1 // indirect
